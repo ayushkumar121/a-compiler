@@ -1,5 +1,5 @@
 typedef enum {
-	token_error,
+	token_none,
 	token_left_paren,
 	token_right_paren,
 	token_left_curly,
@@ -26,7 +26,8 @@ typedef enum {
 } token_type;
 
 typedef enum {
-	keyword_void = 1,
+	keyword_none,
+	keyword_void,
 	keyword_int,
 	keyword_uint,
 	keyword_byte,
@@ -40,7 +41,6 @@ typedef enum {
 	keyword_error,
 	keyword_typ,
 	keyword_static,
-	keyword_var,
 	keyword_const,
 	keyword_enum,
 	keyword_if,
@@ -69,11 +69,11 @@ typedef struct {
 } token;
 
 #define keyword_none (keyword_type)0
-#define token_none (token){0}
+#define token_eof (token){0}
 
 typedef struct {
-	size_t start;
-	size_t end;
+	int start;
+	int end;
 	string source;
 	string file;
 	token current_token;
@@ -110,8 +110,6 @@ static keyword_type lexer_match_keyword(string s) {
 		return keyword_typ;
 	} else if (keyword_cmp("static", s)) {
 		return keyword_static;
-	} else if (keyword_cmp("var", s)) {
-		return keyword_var;
 	} else if (keyword_cmp("const", s)) {
 		return keyword_const;
 	} else if (keyword_cmp("enum", s)) {
@@ -187,7 +185,7 @@ static token lexer_match_token(lexer* lex) {
 	  lex->start++;
 	}
 	if (lex->start >= lex->source.len) {
-	  return token_none;
+	  return token_eof;
 	}  
 	lex->end = lex->start;
 
@@ -234,14 +232,14 @@ static token lexer_match_token(lexer* lex) {
 	    	lex->end++;
 		}
 		if (lex->end >= lex->source.len) {
-			return token_none;
+			return token_eof;
 		}
 		lex->end++;
 		string value = lexer_current_value(lex);
 		return (token){.type=token_string, .value=value};
 	}
 
-	return token_none;
+	return token_eof;
 }
 
 lexer lexer_from_file(string file_path) {
@@ -276,7 +274,7 @@ typedef struct {
 lexer_file_loc lexer_current_loc(lexer* lex) {
 	int line = 1;
 	int col = 1;
-	size_t i = 0;
+	int i = 0;
 	while (i < lex->start) {
 		if (lex->source.ptr[i] == '\n') {
 			col = 1;

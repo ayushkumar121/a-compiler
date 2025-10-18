@@ -1,12 +1,11 @@
 // begin types
 
 typedef struct type type;
-typedef struct paramter paramter;
-typedef struct paramter_list paramter_list;
 typedef struct expression expression;
 typedef struct expression_list expression_list;
 typedef struct statement statement;
 typedef struct block block;
+typedef struct declaration declaration;
 
 typedef struct {
 	int len;
@@ -37,6 +36,7 @@ typedef enum {
 } primitive_type;
 
 typedef enum {
+	wrapped_type_constant,
 	wrapped_type_pointer,
 	wrapped_type_optional,
 	wrapped_type_result,
@@ -74,16 +74,16 @@ typedef struct type {
 
 // end types
 
-typedef struct parameter {
+typedef struct declaration {
 	type type;
 	string identifier;
-} parameter;
+} declaration;
 
-typedef struct paramter_list {
+typedef struct {
 	int len;
 	int cap;
-	parameter* ptr;
-} parameter_list;
+	declaration* ptr;
+} declaration_list;
 
 typedef enum {
 	expression_type_literal,
@@ -126,7 +126,6 @@ typedef enum {
 } statement_type;
 
 typedef struct {
-	bool constant;
 	type type;
 	string identifier;
 	expression value;
@@ -142,6 +141,7 @@ typedef struct {
 } statement_func_call;
 
 typedef struct block {
+	string_map declaration_map;
 	struct {
 		int len;
 		int cap;
@@ -159,41 +159,22 @@ typedef struct statement {
 	} as;
 } statement;
 
-// typedef struct statement_list {
-// 	int len;
-// 	int cap;
-// 	statement* ptr;
-// } statement_list;
-
 typedef struct {
 	string identifier;
 	type return_type;
-	parameter_list parameters;
+	declaration_list arguments;
 	statement_block block;
 } function;
 
 typedef struct {
-	int len;
-	int cap;
-	function* ptr;
-} function_list;
-
-typedef struct {
 	string identifier;
-	parameter_list parameters;
+	declaration_list parameters;
 } strukt;
 
 typedef struct {
-	int len;
-	int cap;
-	strukt* ptr;
-} struct_list;
-
-typedef struct {
-	struct_list structs;
-	function_list funcs;
+	string_map structs_map;
+	string_map function_map;
 } program;
-
 
 // Error reporting
 void report_error(lexer* lex, string message, const char* file, int line) {
@@ -212,8 +193,11 @@ void report_error_and_exit_(lexer* lex, string message, const char* file, int li
 	exit(1);
 }
 
+// printers
+
 string keyword_to_string(keyword_type keyword) {
     switch (keyword) {
+    case keyword_none: return sv("");
     case keyword_void: return sv("void");
     case keyword_int: return sv("int");
     case keyword_uint: return sv("uint");
@@ -228,7 +212,6 @@ string keyword_to_string(keyword_type keyword) {
     case keyword_error: return sv("error");
     case keyword_typ: return sv("typ");
     case keyword_static: return sv("static");
-    case keyword_var: return sv("var");
     case keyword_const: return sv("const");
     case keyword_enum: return sv("enum");
     case keyword_if: return sv("if");
@@ -269,6 +252,7 @@ string primitive_to_string(primitive_type primitive) {
 
 string wrapped_to_string(wrapped_type_type typ) {
 	switch(typ) {
+	case wrapped_type_constant: return sv("const ");
 	case wrapped_type_pointer: return sv("*");
 	case wrapped_type_optional: return sv("?");
 	case wrapped_type_result: return sv("!");
@@ -313,12 +297,12 @@ primitive_type parse_primitive(lexer* lex, keyword_type keyword) {
 	case keyword_ulong: return primitive_ulong;
 	case keyword_float: return primitive_float;
 	case keyword_double: return primitive_double;
-	default: report_error_and_exit(lex, tconcat(sv("expected a type but got "), lex->current_token.value));
+	default: report_error_and_exit(lex, tconcat(sv("expected type got "), lex->current_token.value));
 	}
 	assert(0);
 }
 
-// type = (*)(|?|!|[n]|[])(int|indef) | func(type...)type
+// type = const (*)(|?|!|[n]|[])(int|indef) | func(type...)type
 type parse_type(lexer* lex) {
 	type typ = {0};
 
@@ -356,8 +340,15 @@ type parse_type(lexer* lex) {
 		typ.as.wrapped.inner = malloc(sizeof(type));
 		*(typ.as.array.inner) = parse_type(lex);
 	} else if (t.type == token_keyword) {
-		typ.type = type_primitive;
-		typ.as.primitive = parse_primitive(lex, t.keyword);
+		if (t.keyword == keyword_const) {
+			typ.type = type_wrapped;
+			typ.as.wrapped.type = wrapped_type_constant;
+			typ.as.wrapped.inner = malloc(sizeof(type));
+			*(typ.as.wrapped.inner) = parse_type(lex);
+		} else {
+			typ.type = type_primitive;
+			typ.as.primitive = parse_primitive(lex, t.keyword);
+		}
 	} else if (t.type == token_identifier) {
 		typ.type = type_struct;
 		typ.as.strukt.identifier = t.value;
@@ -371,16 +362,16 @@ type parse_type(lexer* lex) {
 	return typ;
 }
 
-// param = type ident
-parameter parse_parameter(lexer* lex) {
-	parameter param = {0};
+// decl = type ident
+declaration parse_declaration(lexer* lex) {
+	declaration decl = {0};
+	decl.type = parse_type(lex);
 	token t = lexer_next_token(lex);
 	if (t.type != token_identifier) {
 		report_error_and_exit(lex, tconcat(sv("expected identifier but got "), t.value));
 	}
-	param.identifier = t.value;
-	param.type = parse_type(lex);
-	return param;
+	decl.identifier = t.value;
+	return decl;
 }
 
 expression parse_expression(lexer* lex) {
@@ -404,17 +395,20 @@ expression parse_expression(lexer* lex) {
 	return ex;
 }
 
-statement parse_statement(lexer* lex) {
+statement parse_statement(lexer* lex, block* blck) {
 	statement s = {0};
 
 	token t = lexer_next_token(lex);
-	if (t.type == token_keyword && (t.keyword == keyword_var || t.keyword == keyword_const)) {
-		s.type = statement_type_decl;
-		s.as.declaration.constant = t.keyword == keyword_const;
+	if (t.type == token_keyword) {
+		lexer_rewind(lex);
 
-		parameter param = parse_parameter(lex);
-		s.as.declaration.type = param.type;
-		s.as.declaration.identifier = param.identifier;
+		s.type = statement_type_decl;
+
+		declaration decl = parse_declaration(lex);
+		s.as.declaration.type = decl.type;
+		s.as.declaration.identifier = decl.identifier;
+
+		smap_put(&blck->declaration_map, s.as.declaration.identifier, &decl);
 
 		t = lexer_next_token(lex);
 		if (t.type == token_equal) {
@@ -461,12 +455,13 @@ statement parse_statement(lexer* lex) {
 		}
 	} else if (t.type == token_left_curly) {
 		s.type = statement_type_block;
+		s.as.block.declaration_map = smap_new(declaration, 10);
 		while(true) {
 			t = lexer_next_token(lex);
 			if (t.type == token_right_curly) break;
 			lexer_rewind(lex);
 
-			statement st = parse_statement(lex);
+			statement st = parse_statement(lex, &s.as.block);
 			array_append(&(s.as.block.statements), st);
 		}
 	} else {
@@ -478,6 +473,7 @@ statement parse_statement(lexer* lex) {
 
 function parse_func(lexer* lex) {
 	function func = {0};
+	func.block.declaration_map = smap_new(declaration, 10);
 
 	// Parsing identifier
 	token t = lexer_next_token(lex);
@@ -498,8 +494,8 @@ function parse_func(lexer* lex) {
 			if (t.type == token_right_paren) break;
 			lexer_rewind(lex);
 
-			parameter param = parse_parameter(lex);
- 			array_append(&func.parameters, param);
+			declaration decl = parse_declaration(lex);
+ 			array_append(&func.arguments, decl);
 
  			t = lexer_next_token(lex);
  			if (t.type == token_comma) continue;
@@ -525,7 +521,7 @@ function parse_func(lexer* lex) {
 			if (t.type == token_right_curly) break;
 			lexer_rewind(lex);
 
-			statement st = parse_statement(lex);
+			statement st = parse_statement(lex, &func.block);
 			array_append(&(func.block.statements), st);
 		}
 	}
@@ -554,8 +550,8 @@ strukt parse_struct(lexer* lex) {
 			if (t.type == token_right_curly) break;
 			lexer_rewind(lex);
 
-			parameter param = parse_parameter(lex);
- 			array_append(&s.parameters, param);
+			declaration decl = parse_declaration(lex);
+ 			array_append(&s.parameters, decl);
 
  			t = lexer_next_token(lex);
  			if (t.type == token_semicolon) continue;
@@ -573,14 +569,17 @@ strukt parse_struct(lexer* lex) {
 
 program parse_program(lexer* lex) {
 	program prg = {0};
+	prg.structs_map = smap_new(strukt, 10);
+	prg.function_map = smap_new(function, 10);
+
 	token t = lexer_next_token(lex);
-	while (t.type != token_error) {
+	while (t.type != token_none) {
 		if (t.type == token_keyword && t.keyword == keyword_func) {
 			function f = parse_func(lex);
-			array_append(&prg.funcs, f);
+			smap_put(&prg.function_map, f.identifier, &f);
 		} else if (t.type == token_keyword && t.keyword == keyword_struct) {
 			strukt s = parse_struct(lex);
-			array_append(&prg.structs, s);
+			smap_put(&prg.structs_map, s.identifier, &s);
 		} else {
 			report_error_and_exit(lex, tprintf("encountered unknown token `%.*s` at top level", string_arg(t.value)));
 		}
