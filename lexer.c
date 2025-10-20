@@ -38,6 +38,7 @@ typedef enum {
 	keyword_ulong,
 	keyword_float,
 	keyword_double,
+	keyword_string,
 	keyword_error,
 	keyword_typ,
 	keyword_static,
@@ -60,15 +61,14 @@ typedef enum {
 	keyword_union,
 	keyword_import,
 	keyword_nil,
-} keyword_type;
+} keyword;
 
 typedef struct {
 	token_type type;
-	keyword_type keyword;
+	keyword keyword;
 	string value;
 } token;
 
-#define keyword_none (keyword_type)0
 #define token_eof (token){0}
 
 typedef struct {
@@ -76,12 +76,15 @@ typedef struct {
 	int end;
 	string source;
 	string file;
-	token current_token;
 } lexer;
+
+inline static string lexer_current_value(lexer* lex) {
+	return (string){lex->end - lex->start, lex->source.ptr + lex->start};
+}
 
 #define keyword_cmp(k, s) (k[0] == s.ptr[0] && sizeof(k)-1 == s.len && memcmp(k, s.ptr, s.len) == 0)
 
-static keyword_type lexer_match_keyword(string s) {
+keyword lexer_match_keyword(string s) {
 	if (keyword_cmp("void", s)) {
 		return keyword_void;
 	} else if (keyword_cmp("int", s)) {
@@ -104,6 +107,8 @@ static keyword_type lexer_match_keyword(string s) {
 		return keyword_float;
 	} else if (keyword_cmp("double", s)) {
 		return keyword_double;
+	} else if (keyword_cmp("string", s)) {
+		return keyword_string;
 	} else if (keyword_cmp("error", s)) {
 		return keyword_error;
 	} else if (keyword_cmp("type", s)) {
@@ -150,7 +155,7 @@ static keyword_type lexer_match_keyword(string s) {
 	return keyword_none;
 }
 
-static token_type lexer_match_symbols(char ch) {
+token_type lexer_match_symbols(char ch) {
 	switch (ch) {
   	case '(': return token_left_paren;
 	case ')': return token_right_paren;	
@@ -175,11 +180,23 @@ static token_type lexer_match_symbols(char ch) {
  	return 0;
 }
 
-static string lexer_current_value(lexer* lex) {
-	return (string){lex->end - lex->start, lex->source.ptr + lex->start};
+#define lexer_from_string(source) lexer_from_string_(source, sv(__FILE__))
+
+lexer lexer_from_string_(string source, string file_path) {
+	lexer lex = {0};
+	lex.file = file_path;
+	lex.source = source;
+	return lex;
 }
 
-static token lexer_match_token(lexer* lex) {
+lexer lexer_from_file(string file_path) {
+	lexer lex = {0};
+	lex.file = file_path;
+	lex.source = file_read_to_string(file_path.ptr);
+	return lex;
+}
+
+token lexer_peek_token(lexer* lex) {
 	// Skip whitespace
 	while (lex->start < lex->source.len && isspace(lex->source.ptr[lex->start])) {
 	  lex->start++;
@@ -190,12 +207,12 @@ static token lexer_match_token(lexer* lex) {
 	lex->end = lex->start;
 
 	// Matching Symbols
-	token_type symbol_type = lexer_match_symbols(lex->source.ptr[lex->end]);
-	if (symbol_type != 0) {
+	token_type symbol = lexer_match_symbols(lex->source.ptr[lex->end]);
+	if (symbol != token_none) {
 		lex->end++;
 		
 		string value = lexer_current_value(lex);
-		return (token){.type=symbol_type, .value=value};
+		return (token){.type=symbol, .value=value};
 	}
 
 	// Matching identifier/keyword
@@ -207,10 +224,10 @@ static token lexer_match_token(lexer* lex) {
 		}
 
 		string value = lexer_current_value(lex);
-		keyword_type keyword = lexer_match_keyword(value);
+		keyword kw = lexer_match_keyword(value);
 
-		if (keyword != keyword_none) {
-			return (token){.type=token_keyword, .keyword=keyword, .value=value};
+		if (kw != keyword_none) {
+			return (token){.type=token_keyword, .keyword=kw, .value=value};
 		} else {
 			return (token){.type=token_identifier, .value=value};
 		}
@@ -242,27 +259,10 @@ static token lexer_match_token(lexer* lex) {
 	return token_eof;
 }
 
-lexer lexer_from_file(string file_path) {
-	lexer lex = {0};
-	lex.file = file_path;
-	lex.source = file_read_to_string(file_path.ptr);
-	return lex;
-}
-
-token lexer_current_token(lexer* lex) {
-	return lex->current_token;
-}
-
 token lexer_next_token(lexer* lex) {
-	token t = lexer_match_token(lex);
-	lex->current_token = t;
+	token t = lexer_peek_token(lex);
 	lex->start = lex->end;
 	return t;
-}
-
-void lexer_rewind(lexer* lex) {
-	lex->end -= lex->current_token.value.len;
-	lex->start = lex->end;
 }
 
 typedef struct {
@@ -287,3 +287,32 @@ lexer_file_loc lexer_current_loc(lexer* lex) {
 	return (lexer_file_loc){lex->file, line, col};
 }
 
+int lexer_source_line_count(lexer* lex) {
+	int lines = 1;
+	int i = 0;
+	while (i < lex->source.len) {
+		if (lex->source.ptr[i] == '\n') {
+			lines++;
+		}
+		i++;
+	}
+	return lines;
+}
+
+string lexer_source_line(lexer* lex, int line) {
+	int lines = 1;
+	int i = 0;
+	while (i < lex->source.len) {
+		if (lines == line) break;
+		if (lex->source.ptr[i] == '\n') {
+			lines++;
+		}
+		i++;
+	}
+	int line_start = i;
+	int line_end = line_start;
+	while (line_end < lex->source.len && lex->source.ptr[line_end] != '\n') {
+		line_end++;
+	}
+	return (string){line_end-line_start, lex->source.ptr+line_start};
+}

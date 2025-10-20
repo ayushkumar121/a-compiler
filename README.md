@@ -12,7 +12,7 @@
 
 1. Optional types
 ```c++
-?int divide(int n, int d) {
+func divide(int n, int d) ?int {
 	if (d == 0) return nil;
 	return n/d;
 }
@@ -20,12 +20,12 @@
 
 2. Result types
 ```c++
-!int divide(int n, int d) {
+func divide(int n, int d) !int {
 	if (d == 0) return error("cannot devide by zero");
 	return n/d;
 }
 
-void main() {
+func main() {
 	int! result = divide(10, 2)
 	if (result) {
 		printf("foo = %v", result!);
@@ -37,7 +37,7 @@ void main() {
 ```c++
 import json;
 
-void main() {
+func main() {
 	json_value! result = json.decode_from_string("{\"foo\":2}");
 	if (result) {
 		printf("foo = %v", result!["foo"]);
@@ -49,13 +49,13 @@ void main() {
 ```c++
 import json;
 
-void my_memset<type T>(T[] arr, T value) {
+func my_memset<type T>(T[] arr, T value) {
 	for (size_t i = 0; i<arr.len; i++) {
 		arr[i] = value;
 	}
 }
 
-void main() {
+func main() {
 	int[10] arr;
 	my_memset(arr, 10); 
 }
@@ -68,12 +68,12 @@ struct buffer {
 	byte[] data
 }
 
-void delete(buffer b) { // Called on scoped exit
+func delete(buffer b) { // Called on scoped exit
 	println("buffer deleted");
 	delete(b.data);
 }
 
-void main() {
+func main() {
 	buffer b; 
 	b.data = new(10);
 }
@@ -90,10 +90,10 @@ void main() {
 import json;
 
 // External library
-extern("InitWindow") void init_window(int32 width, int32 height char* window_name);
+extern("InitWindow") func init_window(int32 width, int32 height char* window_name);
 
 // Exposed externally
-extern json_value! json_parse(char* json) {
+extern func json_parse(char* json) json_value! {
 	return json.decode_from_string(string_from_cstr(json));
 }
 ```
@@ -105,7 +105,7 @@ struct reverse_iter<type T> {
     size_t index;
 }
 
-T? next<T>(reverse_iter<T>* iter) {
+func next<T>(reverse_iter<T>* iter) T? {
     if (iter.index > 0) {
         iter.index--;
         return iter.data[iter.index];
@@ -113,7 +113,7 @@ T? next<T>(reverse_iter<T>* iter) {
     return nil;
 }
 
-int main() {
+func main() {
 	int[5] data = {1, 2, 3, 4, 5};
 	reverse_iter iter = {data.len-1, data};
 	foreach(item, iter) {
@@ -125,7 +125,7 @@ int main() {
 7. Variatics
 ```c++
 // type... is same as type[]
-string format<type... Args>(string fmt, Args args) {
+func format<type... Args>(string fmt, Args args) string {
 	char[] buf;
 	int i;
 	foreach(ch, fmt) {
@@ -138,7 +138,7 @@ string format<type... Args>(string fmt, Args args) {
 	return {buf};
 }
 
-void main() {
+func main() {
 	println(format("my name is {}", "ayush"));
 }
 ```
