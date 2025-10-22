@@ -463,7 +463,7 @@ type parse_type(lexer* lex) {
 
 		t = lexer_next_token(lex);
 		if (t.type == token_integer) {
-			typ.as.array.size = string_to_int(t.value);
+			typ.as.array.size = string_to_number(t.value);
 
 			t = lexer_next_token(lex);
 			if (t.type != token_right_bracket) {
@@ -775,6 +775,8 @@ statement parse_statement(lexer* lex, int parent_scope_id) {
 				return statement_error;
 			}
 			s.as.declaration.value = expr;
+		} else {
+			s.as.declaration.value.type = expression_type_none;
 		}
 	} else if (t.type == token_identifier) {
 		lexer_next_token(lex);
@@ -987,60 +989,4 @@ program parse_program(lexer* lex) {
 
 	prg.errors = error_count;
 	return prg;
-}
-
-// Symbol Table
-
-typedef struct {
-	type type;
-	string identifier;
-	int scope;
-	int parent_scope;
-} symbol;
-
-typedef struct {
-	int len;
-	int cap;
-	symbol* ptr;
-} symbol_table;
-
-static symbol_table symbols = {0};
-
-void build_symbol_table_for_scope(scope sc) {
-	for (int i=0; i<sc.statements.len; i++) {
-		statement st = sc.statements.ptr[i];
-		if (st.type == statement_type_decl) {
-			symbol syml = {st.as.declaration.type, st.as.declaration.identifier, sc.id, sc.parent_id};
-			array_append(&symbols, syml);
-		} else if (st.type == statement_type_scope) {
-			build_symbol_table_for_scope(st.as.scope);
-		}
-	}
-}
-
-symbol_table build_symbol_table(program prg) {
-	for (int i=0; i<prg.structs.len; i++) {
-		structure s = prg.structs.ptr[i];
-		symbol syml = {type_for_struct(s), s.identifier, 0, 0};
-		array_append(&symbols, syml);
-	}
-	for (int i=0; i<prg.functions.len; i++) {
-		function fn = prg.functions.ptr[i];
-		symbol syml = {type_for_function(fn), fn.identifier, 0, 0};
-		
-		array_append(&symbols, syml);
-		build_symbol_table_for_scope(fn.scope);
-	}
-	return symbols;
-}
-
-void print_symbol_table(symbol_table table) {
-	for (int i=0; i<table.len; i++) {
-		symbol syml = table.ptr[i];
-		print(syml.identifier);
-		print(sv(" "));
-		print(type_to_string(syml.type));
-		printf(" %d ", syml.scope);
-		printf(" %d\n", syml.parent_scope);
-	}
 }

@@ -20,6 +20,12 @@ typedef struct {
   char* ptr;
 } string;
 
+typedef struct {
+  int len;
+  int cap;
+  string* ptr;
+} strings;
+
 #define sv(cstr) (string){sizeof(cstr)-1, cstr}
 #define string_fmt "%.*s"
 #define string_arg(s) (int)(s).len, (s).ptr
@@ -37,6 +43,51 @@ uint32_t string_hash(string key) {
   return h;
 }
 
+typedef struct {
+  string first;
+  string second;
+} string_pair;
+
+string_pair string_split_first(string s, char delim) {
+  int index = -1;
+  for (int i=0; i<s.len; i++) {
+    if (s.ptr[i] == delim) {
+      index=i; 
+      break;
+    }
+  }
+
+  string_pair pair = {0};
+  if (index == -1) {
+    pair.first = s;
+    pair.second = string_empty;
+  } else {
+    pair.first = (string){index, s.ptr};
+    pair.second = (string){s.len-index, s.ptr+index};
+  }
+  return pair;
+}
+
+string_pair string_split_last(string s, char delim) {
+  int index = -1;
+  for (int i=s.len-1; i>=0; i--) {
+    if (s.ptr[i] == delim) {
+      index=i; 
+      break;
+    }
+  }
+
+  string_pair pair = {0};
+  if (index == -1) {
+    pair.first = s;
+    pair.second = string_empty;
+  } else {
+    pair.first = (string){index, s.ptr};
+    pair.second = (string){s.len-index, s.ptr+index};
+  }
+  return pair;
+}
+
 void print(string s) {
   printf("%.*s", string_arg(s));
 }
@@ -50,14 +101,14 @@ void println(string s) {
 _Thread_local size_t temp_allocated = 0;
 _Thread_local char temp_buffer[TEMP_BUFFER_CAP];
 
-size_t align(size_t size) {
-  if (size % 8 == 0)
+size_t align(size_t size, size_t alignment) {
+  if (size % alignment == 0)
     return size;
-  return size + (8 - size % 8);
+  return size + (alignment - size % alignment);
 }
 
 void *talloc(size_t n) {
-  size_t size = align(n);
+  size_t size = align(n, 8);
   assert(size <= TEMP_BUFFER_CAP);
 
   if (temp_allocated + size >= TEMP_BUFFER_CAP) {
@@ -99,10 +150,10 @@ string tconcat(string a, string b) {
   return (string){a.len+b.len, ptr};
 }
 
-bool string_to_int(string s) {
+size_t string_to_number(string s) {
   char* cstr = talloc(s.len);
   memcpy(cstr, s.ptr, s.len);
-  return atoi(cstr);
+  return (size_t)strtol(cstr, (char **)NULL, 10);
 }
 
 typedef struct {
@@ -265,6 +316,26 @@ void strmap_put(strmap* map, string key, void* item) {
     }
   }
   assert(0 && "table full");
+}
+
+bool strmap_remove(strmap* map, string key) {
+  assert(map != NULL);
+  assert(map->item_size != 0);
+  if (map->cap == 0) return NULL;
+
+  uint32_t hash = string_hash(key);
+  for (int i=0; i<map->cap; i++) {
+    size_t slot = (i + hash) % map->cap;
+    strmap_entry* entry = strmap_entry(map, slot);
+    if (!entry->occupied) return NULL;
+    
+    if (string_eq(entry->key, key)) {
+      entry->occupied = false;
+      return true;
+    }
+  }
+
+  return false;
 }
 
 void strmap_free(strmap* map) {
