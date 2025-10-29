@@ -1,7 +1,5 @@
-[44]int arr;
+static [44]int arr;
 
-int main() {
-	arr[1] = 10;
-	arr[2] = 11;
-	return arr[1]+arr[2];
+func main() void {
+	var int a = 0;
 }

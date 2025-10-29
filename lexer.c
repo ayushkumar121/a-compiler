@@ -27,7 +27,6 @@ typedef enum {
 } token_type;
 
 typedef enum {
-	keyword_none,
 	keyword_void,
 	keyword_int,
 	keyword_uint,
@@ -41,8 +40,9 @@ typedef enum {
 	keyword_double,
 	keyword_string,
 	keyword_error,
-	keyword_typ,
+	keyword_type,
 	keyword_static,
+	keyword_var,
 	keyword_const,
 	keyword_enum,
 	keyword_if,
@@ -58,10 +58,11 @@ typedef enum {
 	keyword_return,
 	keyword_extern,
 	keyword_struct,
-	keyword_fn,
+	keyword_func,
 	keyword_union,
 	keyword_import,
 	keyword_nil,
+	keyword_none,
 } keyword;
 
 typedef struct {
@@ -70,7 +71,7 @@ typedef struct {
 	string value;
 } token;
 
-#define token_eof (token){0}
+#define token_eof (token){.type=token_none}
 
 typedef struct {
 	int start;
@@ -86,6 +87,8 @@ inline static string lexer_current_value(lexer* lex) {
 #define keyword_cmp(k, s) (k[0] == s.ptr[0] && sizeof(k)-1 == s.len && memcmp(k, s.ptr, s.len) == 0)
 
 keyword lexer_match_keyword(string s) {
+	static_assert (keyword_none == 35, "lexer_match_keyword needs updating");
+
 	if (keyword_cmp("void", s)) {
 		return keyword_void;
 	} else if (keyword_cmp("int", s)) {
@@ -113,17 +116,19 @@ keyword lexer_match_keyword(string s) {
 	} else if (keyword_cmp("error", s)) {
 		return keyword_error;
 	} else if (keyword_cmp("type", s)) {
-		return keyword_typ;
+		return keyword_type;
 	} else if (keyword_cmp("static", s)) {
 		return keyword_static;
+	} else if (keyword_cmp("var", s)) {
+		return keyword_var;
 	} else if (keyword_cmp("const", s)) {
 		return keyword_const;
 	} else if (keyword_cmp("enum", s)) {
 		return keyword_enum;
 	} else if (keyword_cmp("struct",s)) {
 		return keyword_struct;
-	} else if (keyword_cmp("fn",s)) {
-		return keyword_fn;
+	} else if (keyword_cmp("func",s)) {
+		return keyword_func;
 	} else if (keyword_cmp("if", s)) {
 		return keyword_if;
 	} else if (keyword_cmp("for", s)) {

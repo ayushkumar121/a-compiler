@@ -166,10 +166,13 @@ typedef struct expression {
 #define expression_error (expression){.type=expression_type_none};
 
 typedef struct {
+	bool error;
 	type type;
 	string identifier;
 	expression value;
 } declaration;
+
+#define declaration_error (declaration){.error=true};
 
 typedef struct {
 	int len;
@@ -277,22 +280,6 @@ typedef struct {
 
 #define structure_error (structure){.error=true};
 
-typedef enum {
-	global_declaration_none,
-	global_declaration_identifiers,
-	global_declaration_function,
-} global_declaration_type;
-
-typedef struct {
-	global_declaration_type type;
-	union {
-		declaration declaration;
-		function function;
-	} as;
-} global_declaration;
-
-#define global_decl_error (global_declaration){.type=global_declaration_none};
-
 typedef struct {
 	declaration_list globals;
 	structure_list structs;
@@ -346,7 +333,8 @@ string keyword_to_string(keyword kw) {
     case keyword_double: return sv("double");
     case keyword_string: return sv("string");
     case keyword_error: return sv("error");
-    case keyword_typ: return sv("typ");
+    case keyword_type: return sv("type");
+    case keyword_var: return sv("var");
     case keyword_static: return sv("static");
     case keyword_const: return sv("const");
     case keyword_enum: return sv("enum");
@@ -363,7 +351,7 @@ string keyword_to_string(keyword kw) {
     case keyword_return: return sv("return");
     case keyword_extern: return sv("extern");
     case keyword_struct: return sv("struct");
-    case keyword_fn: return sv("fn");
+    case keyword_func: return sv("func");
     case keyword_union: return sv("union");
     case keyword_import: return sv("import");
     case keyword_nil: return sv("nil");
@@ -589,7 +577,7 @@ type parse_type(lexer* lex) {
 		typ.type = type_struct;
 		typ.as.structure.identifier = t.value;
 		todo("look up parameters for struct"); 
-	} else if (t.type == token_keyword && t.keyword == keyword_fn) {
+	} else if (t.type == token_keyword && t.keyword == keyword_func) {
 		typ.type = type_function;
 		t = lexer_next_token(lex);
 		if (t.type != token_left_paren) {
@@ -863,6 +851,44 @@ expression parse_expression(lexer* lex) {
 	return parse_expression_bp(lex, 0);
 }
 
+declaration parse_declaration(lexer* lex) {
+	declaration decl = {0};
+
+	type type = parse_type(lex);
+	if (type.type == type_none) return declaration_error;
+	decl.type = type;
+
+	token t = lexer_next_token(lex);
+	if (t.type != token_identifier) {
+		report_parser_error(lex, tconcat(sv("expected identifier but got "), t.value));
+		synchronise(lex, synchronise_token_statement);
+		return declaration_error;
+	}
+	decl.identifier = t.value;
+
+	t = lexer_peek_token(lex);
+	if (t.type == token_equal) {
+		expression expr = parse_expression(lex);
+		if (expr.type == expression_type_none) return declaration_error;
+		decl.value = expr;
+
+		t = lexer_next_token(lex);
+		if (t.type != token_semicolon) {
+			report_parser_error(lex, tconcat(sv("expected ; but got "), t.value));
+ 			synchronise(lex, synchronise_token_statement);
+ 			return declaration_error;
+		}
+	} else if (t.type == token_semicolon) {
+		lexer_next_token(lex);
+		decl.value.type = expression_type_none;
+	} else {
+		report_parser_error(lex, tconcat(sv("expected end of declaration but got "), t.value));
+		synchronise(lex, synchronise_token_statement);
+	}
+
+	return decl;
+}
+
 statement parse_statement(lexer* lex) {
 	static_assert(statement_type_none == 7, "parse_statement needs updating");
 
@@ -926,7 +952,8 @@ statement parse_statement(lexer* lex) {
 				array_append(&(s.as.whil.body.statements), st);
 			}
 		}
-	} else if (t.type == token_keyword) {
+	} else if (t.type == token_keyword && (t.keyword == keyword_var || t.keyword == keyword_const)) {
+		if (t.keyword == keyword_var) lexer_next_token(lex);
 		s.type = statement_type_decl;
 
 		binding bind = parse_binding(lex);
@@ -1061,7 +1088,7 @@ structure parse_struct(lexer* lex) {
  			array_append(&s.parameters, bind);
 
  			t = lexer_peek_token(lex);
- 			if (t.type == token_semicolon) lexer_next_token(lex);
+ 			if (t.type == token_comma) lexer_next_token(lex);
  			else if (t.type == token_right_curly) break;
  			else {
  				report_parser_error(lex, tconcat(sv("expected } but got "), t.value));
@@ -1079,29 +1106,25 @@ structure parse_struct(lexer* lex) {
 	return s;
 }
 
-global_declaration parse_gloabl_decl(lexer* lex) {
-	global_declaration gdecl = {0};
-	type typ = parse_type(lex);
-	if (typ.type == type_none) return global_decl_error;
+function parse_function(lexer* lex) {
+	function func = {0};
 
 	token t = lexer_next_token(lex);
 	if (t.type != token_identifier) {
 		report_parser_error(lex, tconcat(sv("expected identifier but got "), t.value));
-		synchronise(lex, synchronise_token_statement);
-		return global_decl_error;
+	} else {
+		func.identifier = t.value;
 	}
-	string identifier = t.value;
 
 	t = lexer_next_token(lex);
-	if (t.type == token_left_paren) {
-		gdecl.type = global_declaration_function;
-		gdecl.as.function.return_type = typ;
-		gdecl.as.function.identifier = identifier;
+	if (t.type == token_less_than) {
+		todo("generic parsing in structs");
+	}
 
-		// Parsing parameter list
+	if (t.type == token_left_paren) {
 		while(token_not_empty_or_equals(lex, token_right_paren)) {
 			binding bind = parse_binding(lex);
- 			array_append(&gdecl.as.function.arguments, bind);
+ 			array_append(&func.arguments, bind);
 
  			t = lexer_peek_token(lex);
  			if (t.type == token_comma) lexer_next_token(lex);
@@ -1109,82 +1132,61 @@ global_declaration parse_gloabl_decl(lexer* lex) {
  			else {
  				report_parser_error(lex, tconcat(sv("expected ) but got "), t.value));
  				synchronise(lex, synchronise_token_func);
- 				return global_decl_error;
+ 				return function_error;
  			}
 		}
 		lexer_next_token(lex);
-
-		t = lexer_next_token(lex);
-		if (t.type != token_left_curly) {
-			report_parser_error(lex, tconcat(sv("expected ) but got "), t.value));
- 			synchronise(lex, synchronise_token_func);
- 			return global_decl_error;
-		}
-
-		// Parsing function body
-		while(token_not_empty_or_equals(lex, token_right_curly)) {
-			statement st = parse_statement(lex);
-			array_append(&(gdecl.as.function.body.statements), st);
-		}
-		lexer_next_token(lex);
-	} else if (t.type == token_equal) {
-		gdecl.type = global_declaration_identifiers;
-		gdecl.as.declaration.type = typ;
-		gdecl.as.declaration.identifier = identifier;
-		expression expr = parse_expression(lex);
-		if (expr.type == expression_type_none) return global_decl_error;
-		gdecl.as.declaration.value = expr;
-
-		t = lexer_next_token(lex);
-		if (t.type != token_semicolon) {
-			report_parser_error(lex, tconcat(sv("expected ; but got "), t.value));
- 			synchronise(lex, synchronise_token_func);
- 			return global_decl_error;
-		}
-	} else if (t.type == token_semicolon) {
-		gdecl.type = global_declaration_identifiers;
-		gdecl.as.declaration.type = typ;
-		gdecl.as.declaration.identifier = identifier;
-		gdecl.as.declaration.value.type = expression_type_none;
 	} else {
-		report_parser_error(lex, tconcat(sv("expected end of declaration but got "), t.value));
-		synchronise(lex, synchronise_token_func);
-		return global_decl_error;
+		report_parser_error(lex, tconcat(sv("unexpected token "), t.value));
+ 		synchronise(lex, synchronise_token_func);
+		return function_error;
 	}
 
-	return gdecl;
-}
+	t = lexer_peek_token(lex);
+	if (t.type != token_left_curly) {
+		type type = parse_type(lex);
+		if (type.type == type_none) return function_error;
+		func.return_type = type;
+	} else {
+		func.return_type.type = type_primitive;
+		func.return_type.as.primitive = primitive_void;
+	}
 
-bool is_decl_start(token t) {
-	return t.type == token_star || 
-	t.type == token_left_bracket || 
-	t.type == token_question || 
-	t.type == token_exclaimation || 
-	t.type == token_keyword || 
-	t.type == token_identifier;
+	t = lexer_next_token(lex);
+	if (t.type != token_left_curly) {
+		report_parser_error(lex, tconcat(sv("expected { but got "), t.value));
+		synchronise(lex, synchronise_token_func);
+		return function_error;
+	}
+
+	while(token_not_empty_or_equals(lex, token_right_curly)) {
+		statement st = parse_statement(lex);
+		array_append(&(func.body.statements), st);
+	}
+	lexer_next_token(lex);
+
+	return func;
 }
 
 program parse_program(lexer* lex) {
 	program prg = {0};
 
-	token t = lexer_peek_token(lex);
+	token t = lexer_next_token(lex);
 	while (t.type != token_none) {
 		if (t.type == token_keyword && t.keyword == keyword_struct) {
-			lexer_next_token(lex);
-			structure s = parse_struct(lex);
-			array_append(&prg.structs, s);
-		} else if (is_decl_start(t)) {
-			global_declaration decl = parse_gloabl_decl(lex);
-			if (decl.type == global_declaration_identifiers) {
-				array_append(&prg.globals, decl.as.declaration);
-			} else if (decl.type == global_declaration_function) {
-				array_append(&prg.functions, decl.as.function);
-			}
+			structure strukt = parse_struct(lex);
+			if (!strukt.error) array_append(&prg.structs, strukt);
+		} else if (t.type == token_keyword && t.keyword == keyword_func) {
+			function func = parse_function(lex);
+			if (!func.error) array_append(&prg.functions, func);
+		} else if (t.type == token_keyword && t.keyword == keyword_static) {
+			declaration decl = parse_declaration(lex);
+			if (!decl.error) array_append(&prg.globals, decl);
 		} else {
 			report_parser_error(lex, tsprintf("encountered unknown token `%.*s` at top level", string_arg(t.value)));
 			synchronise(lex, synchronise_token_func);
 		}
-		t = lexer_peek_token(lex);
+		t = lexer_next_token(lex);
 	}
 
 	return prg;
