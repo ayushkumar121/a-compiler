@@ -8,11 +8,15 @@
 - Language support for common idioms
 - Module system
 
+## References:
+- https://cs.wmich.edu/~gupta/teaching/cs4850/sumII06/The%20syntax%20of%20C%20in%20Backus-Naur%20form.htm
+- 
+
 ## Examples:
 
 1. Optional types
 ```c++
-func divide(int n, int d) ?int {
+?int divide(int n, int d) {
 	if (d == 0) return nil;
 	return n/d;
 }
@@ -20,12 +24,12 @@ func divide(int n, int d) ?int {
 
 2. Result types
 ```c++
-func divide(int n, int d) !int {
+!int divide(int n, int d) {
 	if (d == 0) return error("cannot devide by zero");
 	return n/d;
 }
 
-func main() {
+int! main() {
 	int! result = divide(10, 2)
 	if (result) {
 		printf("foo = %v", result!);
@@ -37,7 +41,7 @@ func main() {
 ```c++
 import json;
 
-func main() {
+json_value! main() {
 	json_value! result = json.decode_from_string("{\"foo\":2}");
 	if (result) {
 		printf("foo = %v", result!["foo"]);
@@ -49,13 +53,13 @@ func main() {
 ```c++
 import json;
 
-func my_memset<type T>(T[] arr, T value) {
+void my_memset<type T>(T[] arr, T value) {
 	for (size_t i = 0; i<arr.len; i++) {
 		arr[i] = value;
 	}
 }
 
-func main() {
+void main() {
 	int[10] arr;
 	my_memset(arr, 10); 
 }
@@ -68,12 +72,12 @@ struct buffer {
 	byte[] data
 }
 
-func delete(buffer b) { // Called on scoped exit
+void delete(buffer b) { // Called on scoped exit
 	println("buffer deleted");
 	delete(b.data);
 }
 
-func main() {
+void main() {
 	buffer b; 
 	b.data = new(10);
 }
@@ -90,10 +94,10 @@ func main() {
 import json;
 
 // External library
-extern("InitWindow") func init_window(int32 width, int32 height char* window_name);
+extern "InitWindow" func init_window(int32 width, int32 height char* window_name);
 
 // Exposed externally
-extern func json_parse(char* json) json_value! {
+extern json_value! nc json_parse(char* json) {
 	return json.decode_from_string(string_from_cstr(json));
 }
 ```
@@ -105,7 +109,7 @@ struct reverse_iter<type T> {
     size_t index;
 }
 
-func next<T>(reverse_iter<T>* iter) T? {
+T? next<T>(reverse_iter<T>* iter) {
     if (iter.index > 0) {
         iter.index--;
         return iter.data[iter.index];
@@ -113,7 +117,7 @@ func next<T>(reverse_iter<T>* iter) T? {
     return nil;
 }
 
-func main() {
+void main() {
 	int[5] data = {1, 2, 3, 4, 5};
 	reverse_iter iter = {data.len-1, data};
 	foreach(item, iter) {
@@ -125,7 +129,7 @@ func main() {
 7. Variatics
 ```c++
 // type... is same as type[]
-func format<type... Args>(string fmt, Args args) string {
+string format<type... Args>(string fmt, Args args) {
 	char[] buf;
 	int i;
 	foreach(ch, fmt) {
@@ -138,7 +142,7 @@ func format<type... Args>(string fmt, Args args) string {
 	return {buf};
 }
 
-func main() {
+void main() {
 	println(format("my name is {}", "ayush"));
 }
 ```

@@ -23,6 +23,12 @@ typedef struct {
 typedef struct {
   int len;
   int cap;
+  char* ptr;
+} string_builder;
+
+typedef struct {
+  int len;
+  int cap;
   string* ptr;
 } strings;
 
@@ -150,10 +156,108 @@ string tconcat(string a, string b) {
   return (string){a.len+b.len, ptr};
 }
 
-size_t string_to_number(string s) {
+const char* string_to_cstr(string s) {
   char* cstr = talloc(s.len);
   memcpy(cstr, s.ptr, s.len);
-  return (size_t)strtol(cstr, (char **)NULL, 10);
+  return cstr;
+}
+
+int64_t string_to_number(string s) {
+  const char* cstr = string_to_cstr(s);
+  return (int64_t)strtoll(cstr, (char **)NULL, 10);
+}
+
+char character_escape(string s) {
+  if (s.len == 1) return s.ptr[0];
+  else {
+    if (string_eq(s, sv("\\\\"))) {
+      return '\\';
+    } else if (string_eq(s, sv("\\n"))) {
+      return '\n';
+    } else if (string_eq(s, sv("\\r"))) {
+      return '\r';
+    } else if (string_eq(s, sv("\\t"))) {
+      return '\t';
+    } else if (string_eq(s, sv("\\b"))) {
+      return '\b';
+    } else if (string_eq(s, sv("\\f"))) {
+      return '\f';
+    } else if (string_eq(s, sv("\\'"))) {
+      return '\'';
+    } else if (string_eq(s, sv("\\\""))) {
+      return '\"';
+    }
+  }
+  return 0;
+}
+
+string character_unescape(char ch) {
+  char* cstr = talloc(2);
+  int len = 0;
+  switch(ch) {
+  case '\\': {
+    cstr[len++] = '\\';
+    cstr[len++] = '\\';
+  } break;
+  
+  case '\"': {
+    cstr[len++] = '\\';
+    cstr[len++] = '\"';
+  } break;
+  
+  case '\'': {
+    cstr[len++] = '\\';
+    cstr[len++] = '\'';
+  } break;
+  
+  case '\n': {
+    cstr[len++] = '\\';
+    cstr[len++] = 'n';
+  } break;
+
+  case '\r': {
+    cstr[len++] = '\\';
+    cstr[len++] = 'r';
+  } break;
+  
+  case '\t': {
+    cstr[len++] = '\\';
+    cstr[len++] = 't';
+  } break;
+  
+  case '\b': {
+    cstr[len++] = '\\';
+    cstr[len++] = 'b';
+  } break;
+  
+  case '\f': {
+    cstr[len++] = '\\';
+    cstr[len++] = 'f';
+  } break;
+  
+  default: {
+      cstr[len++] = ch;
+  } break;
+  }
+  if (ch == '\\' || ch == '\"' || ch == '\'' 
+    || ch == '\n' || ch == '\r' || ch == '\t' 
+    || ch == '\b' || ch == '\f') {
+  }
+  return (string){len, cstr};
+}
+
+string string_unescape(string s) {
+  char* cstr = talloc(s.len*2+1);
+  int len = 0;
+
+  for (int i=0; i<s.len; i++) {
+    string ch = character_unescape(s.ptr[i]);
+    for (int j=0; j<ch.len; j++) {
+      cstr[len++] = ch.ptr[j];
+    }
+  }
+  cstr[len++] = 0; 
+  return (string){len, cstr};
 }
 
 typedef struct {
@@ -345,4 +449,15 @@ void strmap_free(strmap* map) {
     map->len = 0;
     map->cap = 0;
   }
+}
+
+void report_error_old(string message) {
+  error_count++;
+  print(sv("error: "));
+  println(message);
+}
+
+void cmd(string command) {
+  println(tsprintf("CMD: %.*s", string_arg(command)));
+  system(string_to_cstr(command));
 }

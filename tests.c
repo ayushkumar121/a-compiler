@@ -1,3 +1,6 @@
+// Globals
+int error_count = 0;
+
 #include "basic.c"
 #include "lexer.c"
 #include "parser.c"

@@ -1,3 +1,5 @@
+int error_count;
+
 #include "basic.c"
 #include "lexer.c"
 #include "parser.c"
@@ -15,17 +17,12 @@ int main(int argc, char** argv) {
 
 	lexer lex = lexer_from_file(file_path);
 	program prg = parse_program(&lex);
-	if (prg.errors > 0) {
-		fprintf(stderr, "error: %d error encountered\n", prg.errors);
+	intermediate_representation ir = compile(prg);
+	if (error_count > 0) {
+		fprintf(stderr, "error: %d errors occured during compilation\n", error_count);
 		exit(1);
 	}
-
-	instruction_list instructions = compile(prg);
-	if (instructions.len == 0) {
-		fprintf(stderr, "error: cannot generate instructions\n");
-		exit(1);
-	}
-	codegen(instructions, file_path, detect_host_machine());
+	codegen(ir, file_path, detect_host_machine());
 
 	return 0;
 }

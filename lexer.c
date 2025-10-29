@@ -23,6 +23,7 @@ typedef enum {
 	token_identifier,
 	token_integer,
 	token_string,
+	token_char,
 } token_type;
 
 typedef enum {
@@ -57,7 +58,7 @@ typedef enum {
 	keyword_return,
 	keyword_extern,
 	keyword_struct,
-	keyword_func,
+	keyword_fn,
 	keyword_union,
 	keyword_import,
 	keyword_nil,
@@ -121,8 +122,8 @@ keyword lexer_match_keyword(string s) {
 		return keyword_enum;
 	} else if (keyword_cmp("struct",s)) {
 		return keyword_struct;
-	} else if (keyword_cmp("func",s)) {
-		return keyword_func;
+	} else if (keyword_cmp("fn",s)) {
+		return keyword_fn;
 	} else if (keyword_cmp("if", s)) {
 		return keyword_if;
 	} else if (keyword_cmp("for", s)) {
@@ -179,6 +180,7 @@ token_type lexer_match_symbols(char ch) {
 	}
  	return 0;
 }
+
 
 #define lexer_from_string(source) lexer_from_string_(source, sv(__FILE__))
 
@@ -256,17 +258,39 @@ token lexer_peek_token(lexer* lex) {
 		return (token){.type=token_string, .value=value};
 	}
 
+
+	// Matching chars
+	if (lex->source.ptr[lex->start] == '\'') {
+		lex->end++;
+		if (lex->end < lex->source.len && lex->source.ptr[lex->end] == '\\') {
+			lex->end++;
+			if (lex->end < lex->source.len) {
+				lex->end++;
+			}
+		} else if (lex->end < lex->source.len && lex->source.ptr[lex->end] != '\'') {
+			lex->end++;
+		}
+		if (lex->end >= lex->source.len || lex->source.ptr[lex->end] != '\'') {
+			return token_eof;
+		}
+		lex->end++;
+		string value = lexer_current_value(lex);
+		return (token){.type=token_char, .value=value};
+	}
+
 	return token_eof;
 }
 
 token lexer_next_token(lexer* lex) {
 	token t = lexer_peek_token(lex);
+	// println(t.value);
 	lex->start = lex->end;
 	return t;
 }
 
 typedef struct {
 	string file;
+	string source;
 	int line;
 	int col;
 } lexer_file_loc;
@@ -284,14 +308,14 @@ lexer_file_loc lexer_current_loc(lexer* lex) {
 		}
 		i++;
 	}
-	return (lexer_file_loc){lex->file, line, col};
+	return (lexer_file_loc){lex->file, lex->source, line, col};
 }
 
-int lexer_source_line_count(lexer* lex) {
+int lexer_source_line_count(string source) {
 	int lines = 1;
 	int i = 0;
-	while (i < lex->source.len) {
-		if (lex->source.ptr[i] == '\n') {
+	while (i < source.len) {
+		if (source.ptr[i] == '\n') {
 			lines++;
 		}
 		i++;
@@ -299,20 +323,71 @@ int lexer_source_line_count(lexer* lex) {
 	return lines;
 }
 
-string lexer_source_line(lexer* lex, int line) {
+string lexer_source_line(string source, int line) {
 	int lines = 1;
 	int i = 0;
-	while (i < lex->source.len) {
+	while (i < source.len) {
 		if (lines == line) break;
-		if (lex->source.ptr[i] == '\n') {
+		if (source.ptr[i] == '\n') {
 			lines++;
 		}
 		i++;
 	}
 	int line_start = i;
 	int line_end = line_start;
-	while (line_end < lex->source.len && lex->source.ptr[line_end] != '\n') {
+	while (line_end < source.len && source.ptr[line_end] != '\n') {
 		line_end++;
 	}
-	return (string){line_end-line_start, lex->source.ptr+line_start};
+	return (string){line_end-line_start, source.ptr+line_start};
 }
+
+string unquote(string s) {
+  return (string){s.len-2, s.ptr+1};
+}
+
+char lexer_value_to_char(string lex_value) {
+ 	return character_escape(unquote(lex_value));
+}
+
+string lexer_value_to_string(string lex_value) {
+	string s = unquote(lex_value);
+	string_builder sb = {0};
+	int i = 0;
+	while(i<s.len) {
+		if (s.ptr[i] != '\\') {
+			array_append(&sb, s.ptr[i]);
+			i += 1;
+		} else {
+			string ss = {2, s.ptr+i};
+			char ch = character_escape(ss);
+			array_append(&sb, ch);
+			i += 2;
+		}
+	}
+ 	return (string){sb.len, sb.ptr};
+}
+
+int64_t lexer_value_to_integer(string lex_value) {
+  	return string_to_number(lex_value);
+}
+
+// Error reporting
+
+#define report_parser_error(lex, message) repor_error_(lexer_current_loc(lex), message, __FILE__, __LINE__)
+#define report_compiler_error(loc, message) repor_error_(loc, message, __FILE__, __LINE__)
+
+void repor_error_(lexer_file_loc loc, string message, const char* file, int line) {
+	fprintf(stderr, "%.*s:%d:%d error: %.*s see compiler:%s:%d\n", 
+		string_arg(loc.file), loc.line, loc.col, string_arg(message), file, line);
+
+	int line_count = lexer_source_line_count(loc.source);
+	for (int i = max(loc.line-2, 1); i<=min(loc.line+2, line_count); i++) {
+		string source_line = lexer_source_line(loc.source, i);
+		if (i == loc.line) fprintf(stderr, "->");
+		else fprintf(stderr, "  ");
+		fprintf(stderr, "%5d|%.*s\n", i, string_arg(source_line));
+	}
+
+	error_count++;
+}
+
