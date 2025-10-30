@@ -852,22 +852,17 @@ expression parse_expression(lexer* lex) {
 }
 
 declaration parse_declaration(lexer* lex) {
+	token t = lexer_peek_token(lex);
+	if (t.keyword == keyword_var) lexer_next_token(lex);
 	declaration decl = {0};
 
-	type type = parse_type(lex);
-	if (type.type == type_none) return declaration_error;
-	decl.type = type;
-
-	token t = lexer_next_token(lex);
-	if (t.type != token_identifier) {
-		report_parser_error(lex, tconcat(sv("expected identifier but got "), t.value));
-		synchronise(lex, synchronise_token_statement);
-		return declaration_error;
-	}
-	decl.identifier = t.value;
+	binding binding = parse_binding(lex);
+	decl.type = binding.type;
+	decl.identifier = binding.identifier;
 
 	t = lexer_peek_token(lex);
 	if (t.type == token_equal) {
+		lexer_next_token(lex);
 		expression expr = parse_expression(lex);
 		if (expr.type == expression_type_none) return declaration_error;
 		decl.value = expr;
@@ -956,20 +951,11 @@ statement parse_statement(lexer* lex) {
 		if (t.keyword == keyword_var) lexer_next_token(lex);
 		s.type = statement_type_decl;
 
-		binding bind = parse_binding(lex);
-		s.as.declaration.type = bind.type;
-		s.as.declaration.identifier = bind.identifier;
-
-		if (lexer_peek_token(lex).type == token_equal) {
-			lexer_next_token(lex);
-			expression expr = parse_expression(lex);
-			if (expr.type == expression_type_none) {
-				return statement_error;
-			}
-			s.as.declaration.value = expr;
-		} else {
-			s.as.declaration.value.type = expression_type_none;
+		declaration decl = parse_declaration(lex);
+		if (decl.error) {
+			return statement_error;
 		}
+		s.as.declaration = decl;
 	} else if (t.type == token_identifier) {
 		lexer_next_token(lex);
 		string identifier = t.value;
@@ -1161,7 +1147,7 @@ function parse_function(lexer* lex) {
 
 	while(token_not_empty_or_equals(lex, token_right_curly)) {
 		statement st = parse_statement(lex);
-		array_append(&(func.body.statements), st);
+		if(st.type != statement_type_none) array_append(&(func.body.statements), st);
 	}
 	lexer_next_token(lex);
 
@@ -1179,7 +1165,7 @@ program parse_program(lexer* lex) {
 		} else if (t.type == token_keyword && t.keyword == keyword_func) {
 			function func = parse_function(lex);
 			if (!func.error) array_append(&prg.functions, func);
-		} else if (t.type == token_keyword && t.keyword == keyword_static) {
+		} else if (t.type == token_keyword && (t.keyword == keyword_var || t.keyword == keyword_const)) {
 			declaration decl = parse_declaration(lex);
 			if (!decl.error) array_append(&prg.globals, decl);
 		} else {
