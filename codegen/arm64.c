@@ -100,33 +100,44 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 
 			case INS_ASSIGN: {
 				fprintf(out, "; INS_ASSIGN\n");
+				char reg_size = in.as.assign.destination.size <= 4 ? 'w' : 'x';
 
 				load_arg(out, 0, in.as.assign.value);
+				if (in.as.assign.index.type != argument_type_none) {
+					load_arg(out, 2, in.as.assign.index);
+					load_immediate(out, 3, 8, in.as.assign.destination.stride);
+					fprintf(out, "   mul x2, x2, x3\n");
+				}
 
 				if (in.as.assign.destination.type == argument_type_local_var) {
-					fprintf(out, "   str x0, [x29, #-%zu]\n", 16+in.as.assign.destination.as.var.offset);
+					fprintf(out, "   mov x1, #-%zu\n", 16+in.as.assign.destination.as.var.offset);
+					if (in.as.assign.index.type != argument_type_none) 
+						fprintf(out, "   add x1, x1, x2\n");
+					fprintf(out, "   str %c0, [x29, x1]\n", reg_size);
 				} else if (in.as.assign.destination.type == argument_type_global_var) {
+				    fprintf(out, "   mov x1, #%zu\n", in.as.assign.destination.as.var.offset);
+					if (in.as.assign.index.type != argument_type_none) 
+						fprintf(out, "   add x1, x1, x2\n");
 				    fprintf(out, "   adrp x9, _globals@PAGE\n");
 	    			fprintf(out, "   add x9, x9, _globals@PAGEOFF\n");
-					fprintf(out, "   str x0, [x9, #%zu]\n", in.as.assign.destination.as.var.offset);
+					fprintf(out, "   str %c0, [x9, x1]\n", reg_size);
 				} else unreachable;
 
 
+				// Special handling for strings TODO: make this generic for all structs
 				if(in.as.assign.value.type == argument_type_literal &&
 					in.as.assign.value.as.literal.type == argument_literal_type_string) {
 	    			load_immediate(out, 0, 8, in.as.assign.value.as.literal.as.string.len);
 
-					size_t len_offset = 16+in.as.assign.destination.as.var.offset + 8;
+					size_t len_offset = in.as.assign.destination.as.var.offset + 8;
 					if (in.as.assign.destination.type == argument_type_local_var) {
-						fprintf(out, "   str w0, [x29, #-%zu]\n", len_offset);
+						fprintf(out, "   str w0, [x29, #-%zu]\n", 16+len_offset);
 					} else if (in.as.assign.destination.type == argument_type_global_var) {
 					    fprintf(out, "   adrp x9, _globals@PAGE\n");
 		    			fprintf(out, "   add x9, x9, _globals@PAGEOFF\n");
 						fprintf(out, "   str w0, [x9, #%zu]\n", len_offset);
 					} else unreachable;
-
 				}
-
 			} break;
 
 			case INS_INTRINSIC: {
@@ -137,7 +148,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 				case intrinsic_add:
 					load_arg(out, 0, in.as.intrinsic.args[0]);
 					load_arg(out, 1, in.as.intrinsic.args[1]);
-					fprintf(out, "   add %c0, %c0, %c1\n", reg_size, reg_size, reg_size);
+					fprintf(out, "   add %1$c0, %1$c0, %1$c1\n", reg_size);
 					break;
 				case intrinsic_sub:
 					load_arg(out, 0, in.as.intrinsic.args[0]);
@@ -167,14 +178,22 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 				} break;
 
 			    case intrinsic_index: {
-					argument arg = in.as.intrinsic.args[0];
-					size_t index = in.as.intrinsic.args[1].as.literal.as.integer.value;
+			    	argument arg = in.as.intrinsic.args[0];
+
+			    	load_immediate(out, 0, 8, arg.stride);
+			    	load_arg(out, 1, in.as.intrinsic.args[1]);
+					fprintf(out, "   mul x0, x0, x1\n");
+
 					if (arg.type == argument_type_local_var) {
-						fprintf(out, "  ldr %c0, [sp, #%zu]\n", reg_size, arg.as.var.offset + arg.stride * index);
+						fprintf(out, "   mov x1, #-%zu\n", arg.as.var.offset);
+						fprintf(out, "   add x0, x0, x1\n");
+						fprintf(out, "  ldr %c0, [x29, x0]\n", reg_size);
 					} else if (arg.type == argument_type_global_var) {
+				    	fprintf(out, "   mov x1, #%zu\n", arg.as.var.offset);
+						fprintf(out, "   add x0, x0, x1\n");
 				    	fprintf(out, "   adrp x9, _globals@PAGE\n");
 	    				fprintf(out, "   add x9, x9, _globals@PAGEOFF\n");
-        				fprintf(out, "   ldr %c0, [x9, #%zu]\n", reg_size, arg.as.var.offset + arg.stride * index);
+        				fprintf(out, "   ldr %c0, [x9, x0]\n", reg_size);
 					}
 				} break;
 				}
@@ -286,4 +305,3 @@ void exegen_for_arm64_macos(string exe_path, string asm_path) {
 	cmd(tsprintf("ld -o %.*s %.*s.o -lSystem -syslibroot `xcrun --show-sdk-path` -e _start", 
 		string_arg(exe_path), string_arg(exe_path)));
 }
-

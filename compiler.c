@@ -44,10 +44,10 @@ typedef enum {
 	INS_SYSCALL
 } instruction_type;
 
-// Store the value in 
 typedef struct {
 	argument destination;
 	argument value;
+	argument index;
 } instruction_assign;
 
 typedef struct {
@@ -145,16 +145,18 @@ typedef struct {
 } intermediate_representation;
 
 typedef enum {
-	symbol_storage_local,
-	symbol_storage_global,
-} symbol_storage;
+	symbol_type_local_var,
+	symbol_type_global_var,
+	symbol_type_func,
+	symbol_type_struct,
+} symbol_type;
 
 typedef struct symbol symbol;
 
 typedef struct symbol {
 	string identifier;
 	type type;
-	symbol_storage storage;
+	symbol_type symbol_type;
 	size_t offset;
 
 	symbol* next;
@@ -176,12 +178,12 @@ void symbol_table_print(symbol_list* symbols) {
 	println(sv(""));
 }
 
-void symbol_add(symbol_list* symbols, symbol_storage storage, string identifier, type type, size_t offset) {
+void symbol_add(symbol_list* symbols, symbol_type symbol_type, string identifier, type type, size_t offset) {
 	symbol* symbl = malloc(sizeof(symbol));
 	symbl->type = type;
 	symbl->identifier = identifier;
 	symbl->offset = offset;
-	symbl->storage = storage;
+	symbl->symbol_type = symbol_type;
 	symbl->prev = NULL;
 	symbl->next = NULL;
 
@@ -335,6 +337,78 @@ intrinsic_type intrinsic_from_expression(expression_tree tree) {
 	unreachable;
 }
 
+type type_of_struct(structure s) {
+	type typ = {0};
+	typ.type = type_struct;
+	typ.as.structure.identifier = s.identifier;
+	for (int i=0; i<s.parameters.len; i++) {
+		array_append(&typ.as.structure.parameters, s.parameters.ptr[i].type);
+	}
+	return typ;
+}
+
+type type_of_function(function fn) {
+	type typ = {0};
+	typ.type = type_function;
+	typ.as.function.return_type = malloc(sizeof(type));
+	*(typ.as.function.return_type) = fn.return_type;
+	for (int i=0; i<fn.arguments.len; i++) {
+		array_append(&typ.as.function.arguments, fn.arguments.ptr[i].type);
+	}
+	return typ;
+}
+
+type type_of_primitive(primitive_type primitive) {
+	type typ = {0};
+	typ.type = type_primitive;
+	typ.as.primitive = primitive;
+	return typ;
+}
+
+type type_of_expression(expression expr, symbol_list* symbols) {
+	switch(expr.type) {
+	case expression_type_literal: {
+		switch(expr.as.literal.type) {
+			case expression_literal_integer: return type_of_primitive(primitive_int);
+			case expression_literal_char: return type_of_primitive(primitive_byte);
+			case expression_literal_string: return type_of_primitive(primitive_string);
+		}
+	}
+	case expression_type_identifier: {
+		symbol* symbl = symbol_lookup(symbols, expr.as.identifier.identifier);
+		if (symbl == NULL) return type_error;
+		return symbl->type;
+	}
+	case expression_type_func_call: {
+		symbol* symbl = symbol_lookup(symbols, expr.as.func_call.identifier);
+		if (symbl == NULL) return type_error;
+		return symbl->type;
+	}
+	case expression_type_tree: 
+	case expression_type_none: unreachable;
+	}
+}
+
+bool type_equal(type a, type b) {
+	if (a.type == b.type) {
+		switch(a.type) {
+		case type_primitive: return a.as.primitive == b.as.primitive;
+		case type_wrapped: 
+			return a.as.wrapped.type == b.as.wrapped.type && 
+			type_equal(*a.as.wrapped.inner, *b.as.wrapped.inner);
+		case type_slice: 
+			return type_equal(*a.as.slice.inner, *b.as.slice.inner);
+		case type_array:
+			return a.as.array.size == b.as.array.size &&
+			type_equal(*a.as.array.inner, *b.as.array.inner);
+		case type_struct:
+		case type_function: 
+		case type_none: unreachable;
+		}
+	}
+	return false;
+}
+
 argument compile_expression(lexer_file_loc loc, expression expr,  size_t destination_size, size_t* stack_size, symbol_list* symbols) {
 	switch(expr.type) {
 	case expression_type_literal: {
@@ -363,7 +437,7 @@ argument compile_expression(lexer_file_loc loc, expression expr,  size_t destina
 		size_t stride = stride_of_type(symbl->type);
 		size_t offset = symbl->offset;
 
-		if (symbl->storage == symbol_storage_global) {
+		if (symbl->symbol_type == symbol_type_global_var) {
 			return argument_global_var(offset, size, stride);
 		} else {
 			return argument_local_var(offset, size, stride);
@@ -435,15 +509,20 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 			size_t stride = stride_of_type(stm.as.declaration.type);
 			*stack_size = *stack_size + size;
 
+			symbol_add(symbols, symbol_type_local_var, stm.as.declaration.identifier, stm.as.declaration.type, offset);
+
 			if (stm.as.declaration.value.type != expression_type_none) {
+				if (!type_equal(stm.as.declaration.type, type_of_expression(stm.as.declaration.value, symbols))) {
+					report_compiler_error(stm.loc, tconcat(sv("expected value to be of type "), type_to_string(stm.as.declaration.type)));
+					continue;
+				}
+
 				instruction ins = {0};
 				ins.type = INS_ASSIGN;
 				ins.as.assign.destination = argument_local_var(offset, size, stride);
 				ins.as.assign.value = compile_expression(stm.loc, stm.as.declaration.value, size, stack_size, symbols);
 				array_append(&instructions, ins);
 			}
-
-			symbol_add(symbols, symbol_storage_local, stm.as.declaration.identifier, stm.as.declaration.type, offset);
 		} break;
 		case statement_type_assign: {
 			destination dest = stm.as.assignment.destination;
@@ -454,30 +533,39 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 				continue;
 			}
 
+			type symbl_type = symbl->type;
 			instruction ins = {0};
 			ins.type = INS_ASSIGN;
 
-			type symbl_type = symbl->type;
-			size_t offset_offset = 0;
-			if (dest.type == destination_type_subscript) {
+			if (dest.type == destination_type_indexed) {
 				if (symbl_type.type != type_array) {
 					report_compiler_error(stm.loc, tconcat(sv("cannot index into type "), type_to_string(symbl_type)));
 					continue;
 				}
+				ins.as.assign.index = compile_expression(stm.loc, dest.as.indexed.value, 4, stack_size, symbols);
 
-				offset_offset = dest.offset * size_of_type(*symbl_type.as.array.inner);
+				type inner_type = *symbl_type.as.array.inner;
+				if (!type_equal(inner_type, type_of_expression(stm.as.assignment.value, symbols))) {
+					report_compiler_error(stm.loc, tconcat(sv("expected value to be of type "), type_to_string(inner_type)));
+					continue;
+				}
+			} else {
+				ins.as.assign.index.type = argument_type_none;
+				if (!type_equal(symbl_type, type_of_expression(stm.as.assignment.value, symbols))) {
+					report_compiler_error(stm.loc, tconcat(sv("expected value to be of type "), type_to_string(symbl_type)));
+					continue;
+				}
 			}
 
 			size_t size = size_of_type(symbl->type);
 			size_t stride = stride_of_type(symbl->type);
-			size_t offset = symbl->offset + offset_offset;
-			
-			if (symbl->storage == symbol_storage_global) {
+			size_t offset = symbl->offset;
+
+			if (symbl->symbol_type == symbol_type_global_var) {
 				ins.as.assign.destination = argument_global_var(offset, size, stride);
 			} else {
 				ins.as.assign.destination = argument_local_var(offset, size, stride);
 			}
-
 			ins.as.assign.value = compile_expression(stm.loc, stm.as.assignment.value, size, stack_size, symbols);
 			array_append(&instructions, ins);
 		} break;
@@ -603,7 +691,7 @@ intermediate_representation compile(program prg) {
 	size_t offset = 0;
 	for (int i=0; i<prg.globals.len; i++) {
 		declaration decl = prg.globals.ptr[i];
-		symbol_add(&symbols, symbol_storage_global, decl.identifier, decl.type, offset);
+		symbol_add(&symbols, symbol_type_global_var, decl.identifier, decl.type, offset);
 		
 		size_t size = size_of_type(decl.type);
 		offset += size;
@@ -614,6 +702,15 @@ intermediate_representation compile(program prg) {
 	for (int i=0; i<prg.functions.len; i++) {
 		function fn = prg.functions.ptr[i];
 		compile_function(fn, &symbols);
+
+		type func_type = type_of_function(fn);
+		symbol_add(&symbols, symbol_type_func, fn.identifier, func_type, i);
+	}
+
+	for (int i=0; i<prg.structs.len; i++) {
+		structure strukt = prg.structs.ptr[i];
+		type strukt_type = type_of_struct(strukt);
+		symbol_add(&symbols, symbol_type_func, strukt.identifier, strukt_type, i);
 	}
 
 	ir.strings = string_literals;

@@ -193,13 +193,16 @@ typedef enum {
 
 typedef enum {
 	destination_type_variable,
-	destination_type_subscript,
+	destination_type_indexed,
 } destination_type;
 
 typedef struct {
 	destination_type type;
 	string identifier;
-	size_t offset;
+	union {
+		struct {expression value;} indexed;
+		struct {} var;
+	} as;
 } destination;
 
 typedef struct {
@@ -493,27 +496,6 @@ primitive_type parse_primitive(keyword kw) {
 	case keyword_string: return primitive_string;
 	default: return primitive_none;
 	}
-}
-
-type type_for_struct(structure s) {
-	type typ = {0};
-	typ.type = type_struct;
-	typ.as.structure.identifier = s.identifier;
-	for (int i=0; i<s.parameters.len; i++) {
-		array_append(&typ.as.structure.parameters, s.parameters.ptr[i].type);
-	}
-	return typ;
-}
-
-type type_for_function(function fn) {
-	type typ = {0};
-	typ.type = type_function;
-	typ.as.function.return_type = malloc(sizeof(type));
-	*(typ.as.function.return_type) = fn.return_type;
-	for (int i=0; i<fn.arguments.len; i++) {
-		array_append(&typ.as.function.arguments, fn.arguments.ptr[i].type);
-	}
-	return typ;
 }
 
 // type = const (*)(|?|!|[n]|[])(int|indef) | func(type...)type
@@ -974,16 +956,13 @@ statement parse_statement(lexer* lex) {
 		} else if (t.type == token_left_bracket) {
 			lexer_next_token(lex);
 			s.type = statement_type_assign;
-			s.as.assignment.destination.type = destination_type_subscript;
+			s.as.assignment.destination.type = destination_type_indexed;
 			s.as.assignment.destination.identifier = identifier;
-			
-			t = lexer_next_token(lex);
-			if (t.type != token_integer) {
-				report_parser_error(lex, tconcat(sv("expected integer for subscript operator got "), t.value));
-        		synchronise(lex, synchronise_token_statement);
-        		return statement_error;
+			expression expr = parse_expression(lex);
+			if (expr.type == expression_type_none) {
+				return statement_error;
 			}
-			s.as.assignment.destination.offset = lexer_value_to_integer(t.value);
+			s.as.assignment.destination.as.indexed.value = expr;
 			t = lexer_next_token(lex);
 			if (t.type != token_right_bracket) {
 				report_parser_error(lex, tconcat(sv("expected ] got "), t.value));
@@ -997,7 +976,7 @@ statement parse_statement(lexer* lex) {
         		return statement_error;
 			}
 
-			expression expr = parse_expression(lex);
+			expr = parse_expression(lex);
 			if (expr.type == expression_type_none) {
 				return statement_error;
 			}
