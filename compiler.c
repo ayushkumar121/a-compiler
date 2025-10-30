@@ -401,7 +401,8 @@ bool type_equal(type a, type b) {
 		case type_array:
 			return a.as.array.size == b.as.array.size &&
 			type_equal(*a.as.array.inner, *b.as.array.inner);
-		case type_struct:
+		case type_struct: 
+			return string_eq(a.as.structure.identifier, b.as.structure.identifier);
 		case type_function: 
 		case type_none: unreachable;
 		}
@@ -691,6 +692,11 @@ intermediate_representation compile(program prg) {
 	size_t offset = 0;
 	for (int i=0; i<prg.globals.len; i++) {
 		declaration decl = prg.globals.ptr[i];
+		symbol* symbl = symbol_lookup(&symbols, decl.identifier);
+		if (symbl != NULL) {
+			report_compiler_error(decl.loc, tconcat(sv("symbol redefinition of "), decl.identifier));
+			continue;
+		}
 		symbol_add(&symbols, symbol_type_global_var, decl.identifier, decl.type, offset);
 		
 		size_t size = size_of_type(decl.type);
@@ -701,6 +707,11 @@ intermediate_representation compile(program prg) {
 
 	for (int i=0; i<prg.functions.len; i++) {
 		function fn = prg.functions.ptr[i];
+		symbol* symbl = symbol_lookup(&symbols, fn.identifier);
+		if (symbl != NULL) {
+			report_compiler_error(fn.loc, tconcat(sv("symbol redefinition of "), fn.identifier));
+			continue;
+		}
 		compile_function(fn, &symbols);
 
 		type func_type = type_of_function(fn);
@@ -709,6 +720,11 @@ intermediate_representation compile(program prg) {
 
 	for (int i=0; i<prg.structs.len; i++) {
 		structure strukt = prg.structs.ptr[i];
+		symbol* symbl = symbol_lookup(&symbols, strukt.identifier);
+		if (symbl != NULL) {
+			report_compiler_error(strukt.loc, tconcat(sv("symbol redefinition of "), strukt.identifier));
+			continue;
+		}
 		type strukt_type = type_of_struct(strukt);
 		symbol_add(&symbols, symbol_type_func, strukt.identifier, strukt_type, i);
 	}

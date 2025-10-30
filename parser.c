@@ -170,6 +170,7 @@ typedef struct {
 	type type;
 	string identifier;
 	expression value;
+	lexer_file_loc loc;
 } declaration;
 
 #define declaration_error (declaration){.error=true};
@@ -259,6 +260,7 @@ typedef struct {
 	type return_type;
 	binding_list arguments;
 	statement_scope body;
+	lexer_file_loc loc;
 } function;
 
 #define function_error (function){.error=true};
@@ -273,6 +275,7 @@ typedef struct {
 	bool error;
 	string identifier;
 	binding_list parameters;
+	lexer_file_loc loc;
 } structure;
 
 typedef struct {
@@ -837,6 +840,7 @@ declaration parse_declaration(lexer* lex) {
 	token t = lexer_peek_token(lex);
 	if (t.keyword == keyword_var) lexer_next_token(lex);
 	declaration decl = {0};
+	decl.loc = lexer_current_loc(lex);
 
 	binding binding = parse_binding(lex);
 	decl.type = binding.type;
@@ -1033,6 +1037,7 @@ statement parse_statement(lexer* lex) {
 
 structure parse_struct(lexer* lex) {
 	structure s = {0};
+	s.loc = lexer_current_loc(lex);
 
 	// Parsing identifier
 	token t = lexer_next_token(lex);
@@ -1073,6 +1078,7 @@ structure parse_struct(lexer* lex) {
 
 function parse_function(lexer* lex) {
 	function func = {0};
+	func.loc = lexer_current_loc(lex);
 
 	token t = lexer_next_token(lex);
 	if (t.type != token_identifier) {
