@@ -48,6 +48,7 @@ typedef struct {
 	argument destination;
 	argument value;
 	argument index;
+	bool is_ref;
 } instruction_assign;
 
 typedef struct {
@@ -236,10 +237,15 @@ size_t size_of_type(type type) {
 		}
 		unreachable;
 	}
-	case type_function: return 8; // function_ptr;
+	case type_wrapped: {
+		switch(type.as.wrapped.type) {
+		case wrapped_type_pointer: return 8; // TODO: pointer size
+		default: unreachable
+		}
+	}
+	case type_function: return 8; // TODO: pointer size
 	case type_array: return type.as.array.size * size_of_type(*type.as.array.inner);
 	case type_slice:
-	case type_wrapped:
 	case type_struct:
 		todo("implement size_of_type")
 	case type_none: unreachable
@@ -341,6 +347,14 @@ type type_of_primitive(primitive_type primitive) {
 	return typ;
 }
 
+type type_of_wrapped(wrapped_type_type wrapped_type, type* inner) {
+	type typ = {0};
+	typ.type = type_wrapped;
+	typ.as.wrapped.type = wrapped_type;
+	typ.as.wrapped.inner = inner;
+	return typ;
+}
+
 type type_of_expression(expression expr) {
 	switch(expr.type) {
 	case expression_type_literal: {
@@ -376,6 +390,11 @@ type type_of_expression(expression expr) {
 			}
 		} else if (expr.as.tree.operands.len == 1) {
 			switch(expr.as.tree.op) {
+			case operator_ampersand: {
+				type* inner = malloc(sizeof(type));
+				*inner = type_of_expression(expr.as.tree.operands.ptr[0]);
+				return type_of_wrapped(wrapped_type_pointer, inner);
+			}
 			default: unreachable;
 			}
 		} else unreachable;
@@ -457,6 +476,7 @@ argument compile_expression(lexer_file_loc loc, expression expr,  size_t destina
 		}
 	} break;
 	case expression_type_func_call: {
+		// TODO: type check
 		size_t offset = *stack_size;
 		*stack_size  = *stack_size + destination_size; 
 
@@ -568,6 +588,11 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 					report_compiler_error(stm.loc, tconcat(sv("cannot index into type "), type_to_string(symbl_type)));
 					continue;
 				}
+
+				if (!type_equal(type_of_primitive(primitive_int), type_of_expression(dest.as.indexed.value))) {
+					report_compiler_error(stm.loc, sv("expected integer for index op "));
+					continue;
+				}
 				ins.as.assign.index = compile_expression(stm.loc, dest.as.indexed.value, 4, stack_size);
 
 				type inner_type = *symbl_type.as.array.inner;
@@ -575,13 +600,15 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 					report_compiler_error(stm.loc, tconcat(sv("expected value to be of type "), type_to_string(inner_type)));
 					continue;
 				}
-			} else {
+			} else if (dest.type == destination_type_ref) {
+				ins.as.assign.is_ref = true;
+			} else if (dest.type == destination_type_variable) {
 				ins.as.assign.index.type = argument_type_none;
 				if (!type_equal(symbl_type, type_of_expression(stm.as.assignment.value))) {
 					report_compiler_error(stm.loc, tconcat(sv("expected value to be of type "), type_to_string(symbl_type)));
 					continue;
 				}
-			}
+			} else unreachable;
 
 			size_t size = size_of_type(symbl->type);
 			size_t stride = stride_of_type(symbl->type);

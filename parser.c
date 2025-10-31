@@ -195,6 +195,7 @@ typedef enum {
 typedef enum {
 	destination_type_variable,
 	destination_type_indexed,
+	destination_type_ref,
 } destination_type;
 
 typedef struct {
@@ -979,8 +980,23 @@ statement parse_statement(lexer* lex) {
         		synchronise(lex, synchronise_token_statement);
         		return statement_error;
 			}
-
 			expr = parse_expression(lex);
+			if (expr.type == expression_type_none) {
+				return statement_error;
+			}
+			s.as.assignment.value = expr;
+		} else if (t.type == token_star) {
+			lexer_next_token(lex);
+			s.type = statement_type_assign;
+			s.as.assignment.destination.type = destination_type_ref;
+			s.as.assignment.destination.identifier = identifier;
+			t = lexer_next_token(lex);
+			if (t.type != token_equal) {
+				report_parser_error(lex, tconcat(sv("expected = got "), t.value));
+				synchronise(lex, synchronise_token_statement);
+				return statement_error;
+			}
+			expression expr = parse_expression(lex);
 			if (expr.type == expression_type_none) {
 				return statement_error;
 			}
