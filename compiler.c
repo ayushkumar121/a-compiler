@@ -168,6 +168,12 @@ typedef struct {
 	symbol* last;
 } symbol_list;
 
+
+strings string_literals = {0};
+instruction_list instructions = {0};
+global_list globals = {0};
+symbol_list symbols = {0};
+
 void symbol_table_print(symbol_list* symbols) {
 	symbol* symbl = symbols->first;
 	while(symbl != NULL) {
@@ -178,7 +184,7 @@ void symbol_table_print(symbol_list* symbols) {
 	println(sv(""));
 }
 
-void symbol_add(symbol_list* symbols, symbol_type symbol_type, string identifier, type type, size_t offset) {
+void symbol_add(symbol_type symbol_type, string identifier, type type, size_t offset) {
 	symbol* symbl = malloc(sizeof(symbol));
 	symbl->type = type;
 	symbl->identifier = identifier;
@@ -187,19 +193,19 @@ void symbol_add(symbol_list* symbols, symbol_type symbol_type, string identifier
 	symbl->prev = NULL;
 	symbl->next = NULL;
 
-	if (symbols->last == NULL) {
-		symbols->first = symbl;
-		symbols->last = symbl;
+	if (symbols.last == NULL) {
+		symbols.first = symbl;
+		symbols.last = symbl;
 	} else {
-		symbols->last->next = symbl;
-		symbl->prev = symbols->last;
-		symbols->last = symbl;
+		symbols.last->next = symbl;
+		symbl->prev = symbols.last;
+		symbols.last = symbl;
 	}
 }
 
-symbol* symbol_lookup(symbol_list* symbols, string identifier) {
-	if(symbols->last != NULL) {
-		symbol* symbl = symbols->last;
+symbol* symbol_lookup(string identifier) {
+	if(symbols.last != NULL) {
+		symbol* symbl = symbols.last;
 		while(symbl != NULL) {
 			if (string_eq(symbl->identifier, identifier)) {
 				return symbl;
@@ -209,10 +215,6 @@ symbol* symbol_lookup(symbol_list* symbols, string identifier) {
 	}
 	return NULL;
 }
-
-strings string_literals = {0};
-instruction_list instructions = {0};
-global_list globals = {0};
 
 size_t size_of_type(type type) {
 	switch(type.type) {
@@ -292,32 +294,6 @@ bool is_constant_expression(expression expr) {
 	return expr.type == expression_type_literal;
 }
 
-bool is_numeric_expression(expression expr, symbol_list* symbols) {
-	switch(expr.type) {
-	case expression_type_literal: {
-		switch(expr.as.literal.type) {
-		case expression_literal_integer:
-		case expression_literal_char: return true;
-		case expression_literal_string: return false;
-		}
-	}
-	case expression_type_identifier: {
-		symbol* symbl = symbol_lookup(symbols, expr.as.identifier.identifier);
-		if (symbl == NULL) return false;
-		return size_of_type(symbl->type) <= 8; // convertible to word
-	}
-	case expression_type_tree: {
-		for (int i=0; i<expr.as.tree.operands.len; i++) {
-			if (!is_numeric_expression(expr.as.tree.operands.ptr[i], symbols)) 
-				return false;
-		}
-		return true;
-	}
-	case expression_type_func_call: todo("this needs updating");
-	case expression_type_none: unreachable;
-	}
-}
-
 intrinsic_type intrinsic_from_expression(expression_tree tree) {
 	if (tree.operands.len == 2) {
 		switch (tree.op) {
@@ -365,7 +341,7 @@ type type_of_primitive(primitive_type primitive) {
 	return typ;
 }
 
-type type_of_expression(expression expr, symbol_list* symbols) {
+type type_of_expression(expression expr) {
 	switch(expr.type) {
 	case expression_type_literal: {
 		switch(expr.as.literal.type) {
@@ -375,16 +351,35 @@ type type_of_expression(expression expr, symbol_list* symbols) {
 		}
 	}
 	case expression_type_identifier: {
-		symbol* symbl = symbol_lookup(symbols, expr.as.identifier.identifier);
+		symbol* symbl = symbol_lookup(expr.as.identifier.identifier);
 		if (symbl == NULL) return type_error;
 		return symbl->type;
 	}
 	case expression_type_func_call: {
-		symbol* symbl = symbol_lookup(symbols, expr.as.func_call.identifier);
+		symbol* symbl = symbol_lookup(expr.as.func_call.identifier);
 		if (symbl == NULL) return type_error;
 		return symbl->type;
 	}
-	case expression_type_tree: 
+	case expression_type_tree: {
+		if (expr.as.tree.operands.len == 2) {
+			switch(expr.as.tree.op) {
+			case operator_minus:
+			case operator_star:
+			case operator_slash:
+			case operator_plus: return type_of_expression(expr.as.tree.operands.ptr[0]);
+			case operator_index: {
+				type type = type_of_expression(expr.as.tree.operands.ptr[0]);
+				assert(type.type == type_array);
+				return *type.as.array.inner;
+			}
+			default: unreachable;
+			}
+		} else if (expr.as.tree.operands.len == 1) {
+			switch(expr.as.tree.op) {
+			default: unreachable;
+			}
+		} else unreachable;
+	}
 	case expression_type_none: unreachable;
 	}
 }
@@ -410,7 +405,24 @@ bool type_equal(type a, type b) {
 	return false;
 }
 
-argument compile_expression(lexer_file_loc loc, expression expr,  size_t destination_size, size_t* stack_size, symbol_list* symbols) {
+bool is_boolean_type(type a) {
+	if (a.type == type_primitive) {
+		switch(a.as.primitive) {
+		case primitive_int:
+		case primitive_uint:
+		case primitive_byte:
+		case primitive_ubyte:
+		case primitive_long:
+		case primitive_ulong:
+			return true;
+		default: return false;
+		} 	
+	}
+	return false; 
+}
+
+
+argument compile_expression(lexer_file_loc loc, expression expr,  size_t destination_size, size_t* stack_size) {
 	switch(expr.type) {
 	case expression_type_literal: {
 		switch(expr.as.literal.type) {
@@ -428,7 +440,7 @@ argument compile_expression(lexer_file_loc loc, expression expr,  size_t destina
 		}
 	} break;
 	case expression_type_identifier: {
-		symbol* symbl = symbol_lookup(symbols, expr.as.identifier.identifier);
+		symbol* symbl = symbol_lookup(expr.as.identifier.identifier);
 		if (symbl == NULL) {
 			report_compiler_error(loc, tconcat(sv("unknown symbol "), expr.as.identifier.identifier));
 			return argument_error;
@@ -448,7 +460,6 @@ argument compile_expression(lexer_file_loc loc, expression expr,  size_t destina
 		size_t offset = *stack_size;
 		*stack_size  = *stack_size + destination_size; 
 
-
 		argument destination = argument_local_var(offset, destination_size, destination_size);
 		instruction ins = {0};
 		ins.type = INS_CALL;
@@ -458,7 +469,7 @@ argument compile_expression(lexer_file_loc loc, expression expr,  size_t destina
 		ins.as.func_call.argc = expr.as.func_call.expressions.len;
 		ins.as.func_call.args = malloc(ins.as.intrinsic.argc * sizeof(argument)); 
 		for (int i=0; i<ins.as.func_call.argc; i++) {
-			ins.as.func_call.args[i] = compile_expression(loc, expr.as.func_call.expressions.ptr[i], destination_size, stack_size, symbols);
+			ins.as.func_call.args[i] = compile_expression(loc, expr.as.func_call.expressions.ptr[i], destination_size, stack_size);
 		}
 		array_append(&instructions, ins);
 
@@ -476,9 +487,19 @@ argument compile_expression(lexer_file_loc loc, expression expr,  size_t destina
 		ins.as.intrinsic.type = intrinsic_from_expression(expr.as.tree);
 		ins.as.intrinsic.argc = expr.as.tree.operands.len;
 		ins.as.intrinsic.args = malloc(ins.as.intrinsic.argc * sizeof(argument)); 
-		for (int i=0; i<ins.as.intrinsic.argc; i++) {
-			ins.as.intrinsic.args[i] = compile_expression(loc, expr.as.tree.operands.ptr[i], destination_size, stack_size, symbols);
-		}
+		
+		if (ins.as.intrinsic.argc == 2) {
+			if (!type_equal(type_of_expression(expr.as.tree.operands.ptr[0]), type_of_expression(expr.as.tree.operands.ptr[1]))) {
+				report_compiler_error(loc, sv("type mismatch in expression"));
+				return argument_error;
+			}
+
+			ins.as.intrinsic.args[0] = compile_expression(loc, expr.as.tree.operands.ptr[0], destination_size, stack_size);
+			ins.as.intrinsic.args[1] = compile_expression(loc, expr.as.tree.operands.ptr[1], destination_size, stack_size);
+		} else if (ins.as.intrinsic.argc == 1) {
+			ins.as.intrinsic.args[0] = compile_expression(loc, expr.as.tree.operands.ptr[0], destination_size, stack_size);
+		} else unreachable;
+
 		array_append(&instructions, ins);
 
 		return destination;
@@ -510,10 +531,10 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 			size_t stride = stride_of_type(stm.as.declaration.type);
 			*stack_size = *stack_size + size;
 
-			symbol_add(symbols, symbol_type_local_var, stm.as.declaration.identifier, stm.as.declaration.type, offset);
+			symbol_add(symbol_type_local_var, stm.as.declaration.identifier, stm.as.declaration.type, offset);
 
 			if (stm.as.declaration.value.type != expression_type_none) {
-				if (!type_equal(stm.as.declaration.type, type_of_expression(stm.as.declaration.value, symbols))) {
+				if (!type_equal(stm.as.declaration.type, type_of_expression(stm.as.declaration.value))) {
 					report_compiler_error(stm.loc, tconcat(sv("expected value to be of type "), type_to_string(stm.as.declaration.type)));
 					continue;
 				}
@@ -521,14 +542,18 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 				instruction ins = {0};
 				ins.type = INS_ASSIGN;
 				ins.as.assign.destination = argument_local_var(offset, size, stride);
-				ins.as.assign.value = compile_expression(stm.loc, stm.as.declaration.value, size, stack_size, symbols);
+				argument value = compile_expression(stm.loc, stm.as.declaration.value, size, stack_size);
+				if (value.type == argument_type_none) {
+					continue;
+				}
+				ins.as.assign.value = value;
 				array_append(&instructions, ins);
 			}
 		} break;
 		case statement_type_assign: {
 			destination dest = stm.as.assignment.destination;
 			string identifier = dest.identifier;
-			symbol* symbl = symbol_lookup(symbols, identifier);
+			symbol* symbl = symbol_lookup(identifier);
 			if (symbl == NULL) {
 				report_compiler_error(stm.loc, tconcat(sv("unknown symbol "), identifier));
 				continue;
@@ -543,16 +568,16 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 					report_compiler_error(stm.loc, tconcat(sv("cannot index into type "), type_to_string(symbl_type)));
 					continue;
 				}
-				ins.as.assign.index = compile_expression(stm.loc, dest.as.indexed.value, 4, stack_size, symbols);
+				ins.as.assign.index = compile_expression(stm.loc, dest.as.indexed.value, 4, stack_size);
 
 				type inner_type = *symbl_type.as.array.inner;
-				if (!type_equal(inner_type, type_of_expression(stm.as.assignment.value, symbols))) {
+				if (!type_equal(inner_type, type_of_expression(stm.as.assignment.value))) {
 					report_compiler_error(stm.loc, tconcat(sv("expected value to be of type "), type_to_string(inner_type)));
 					continue;
 				}
 			} else {
 				ins.as.assign.index.type = argument_type_none;
-				if (!type_equal(symbl_type, type_of_expression(stm.as.assignment.value, symbols))) {
+				if (!type_equal(symbl_type, type_of_expression(stm.as.assignment.value))) {
 					report_compiler_error(stm.loc, tconcat(sv("expected value to be of type "), type_to_string(symbl_type)));
 					continue;
 				}
@@ -567,11 +592,18 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 			} else {
 				ins.as.assign.destination = argument_local_var(offset, size, stride);
 			}
-			ins.as.assign.value = compile_expression(stm.loc, stm.as.assignment.value, size, stack_size, symbols);
+			argument value = compile_expression(stm.loc, stm.as.assignment.value, size, stack_size);
+			if (value.type == argument_type_none) {
+				continue;
+			}
+			ins.as.assign.value = value;
 			array_append(&instructions, ins);
 		} break;
 		case statement_type_return: { // Return also pops scope
-			argument result = compile_expression(stm.loc, stm.as.ret.value, 4, stack_size, symbols);
+			argument result = compile_expression(stm.loc, stm.as.ret.value, 4, stack_size);
+			if (result.type == argument_type_none) {
+				continue;
+			}
 
 			symbols->first = saved.first;
 			symbols->last = saved.last;
@@ -589,18 +621,18 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 			ins.as.func_call.argc = stm.as.func_call.expressions.len;
 			ins.as.func_call.args = malloc(ins.as.func_call.argc * sizeof(argument)); 
 			for (int i=0; i<ins.as.func_call.argc; i++) {
-				ins.as.func_call.args[i] = compile_expression(stm.loc, stm.as.func_call.expressions.ptr[i], 4, stack_size, symbols);
+				ins.as.func_call.args[i] = compile_expression(stm.loc, stm.as.func_call.expressions.ptr[i], 4, stack_size);
 			}
 			array_append(&instructions, ins);
 		} break;
 		case statement_type_if: {
 			instruction ins = {0};
 			ins.type = INS_IF;
-			if (!is_numeric_expression(stm.as.iff.condition, symbols)) {
+			if (!is_boolean_type(type_of_expression(stm.as.iff.condition))) {
 				report_compiler_error(stm.loc, sv("if condition needs to be numeric"));
 				continue;
 			}
-			ins.as.jmp.condition = compile_expression(stm.loc, stm.as.iff.condition, 4, stack_size, symbols);
+			ins.as.jmp.condition = compile_expression(stm.loc, stm.as.iff.condition, 4, stack_size);
 			ins.as.jmp.label = 1;
 			array_append(&instructions, ins);
 
@@ -613,11 +645,11 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 
 			instruction ins = {0};
 			ins.type = INS_WHILE;
-			if (!is_numeric_expression(stm.as.whil.condition, symbols)) {
+			if (!is_boolean_type(type_of_expression(stm.as.whil.condition))) {
 				report_compiler_error(stm.loc, sv("while condition needs to be numeric"));
 				continue;
 			}
-			ins.as.jmp.condition = compile_expression(stm.loc, stm.as.whil.condition, 4, stack_size, symbols);
+			ins.as.jmp.condition = compile_expression(stm.loc, stm.as.whil.condition, 4, stack_size);
 			ins.as.jmp.label = 1;
 			array_append(&instructions, ins);
 
@@ -657,6 +689,11 @@ void compile_function(function fn, symbol_list* symbols) {
 void compile_global_decl(declaration decl, size_t size) {
 	global glb = {.size=size, .identifier=decl.identifier};
 	if (decl.value.type != expression_type_none) {
+		if (!type_equal(decl.type, type_of_expression(decl.value))) {
+			report_compiler_error(decl.loc, sv("type mismatch in expression"));
+			return;
+		}
+
 		if (is_constant_expression(decl.value)) {
 			switch (decl.value.as.literal.type) {
 			case expression_literal_integer: {
@@ -687,17 +724,16 @@ void compile_global_decl(declaration decl, size_t size) {
 
 intermediate_representation compile(program prg) {
 	intermediate_representation ir = {0};
-	symbol_list symbols = {0};
 
 	size_t offset = 0;
 	for (int i=0; i<prg.globals.len; i++) {
 		declaration decl = prg.globals.ptr[i];
-		symbol* symbl = symbol_lookup(&symbols, decl.identifier);
+		symbol* symbl = symbol_lookup(decl.identifier);
 		if (symbl != NULL) {
 			report_compiler_error(decl.loc, tconcat(sv("symbol redefinition of "), decl.identifier));
 			continue;
 		}
-		symbol_add(&symbols, symbol_type_global_var, decl.identifier, decl.type, offset);
+		symbol_add(symbol_type_global_var, decl.identifier, decl.type, offset);
 		
 		size_t size = size_of_type(decl.type);
 		offset += size;
@@ -707,7 +743,7 @@ intermediate_representation compile(program prg) {
 
 	for (int i=0; i<prg.functions.len; i++) {
 		function fn = prg.functions.ptr[i];
-		symbol* symbl = symbol_lookup(&symbols, fn.identifier);
+		symbol* symbl = symbol_lookup(fn.identifier);
 		if (symbl != NULL) {
 			report_compiler_error(fn.loc, tconcat(sv("symbol redefinition of "), fn.identifier));
 			continue;
@@ -715,18 +751,18 @@ intermediate_representation compile(program prg) {
 		compile_function(fn, &symbols);
 
 		type func_type = type_of_function(fn);
-		symbol_add(&symbols, symbol_type_func, fn.identifier, func_type, i);
+		symbol_add(symbol_type_func, fn.identifier, func_type, i);
 	}
 
 	for (int i=0; i<prg.structs.len; i++) {
 		structure strukt = prg.structs.ptr[i];
-		symbol* symbl = symbol_lookup(&symbols, strukt.identifier);
+		symbol* symbl = symbol_lookup(strukt.identifier);
 		if (symbl != NULL) {
 			report_compiler_error(strukt.loc, tconcat(sv("symbol redefinition of "), strukt.identifier));
 			continue;
 		}
 		type strukt_type = type_of_struct(strukt);
-		symbol_add(&symbols, symbol_type_func, strukt.identifier, strukt_type, i);
+		symbol_add(symbol_type_func, strukt.identifier, strukt_type, i);
 	}
 
 	ir.strings = string_literals;

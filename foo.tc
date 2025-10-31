@@ -3,5 +3,5 @@ var [44]int arr;
 func main() void {
 	var int a = 1;
 	arr[a] = 10;
-	return arr[a]+7;
+	return arr[a]+"abc";
 }
