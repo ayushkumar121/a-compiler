@@ -99,58 +99,58 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			} break;
 
 			case INS_ASSIGN: {
-			    fprintf(out, "; %s\n", "INS_ASSIGN");
+				fprintf(out, "; %s\n", "INS_ASSIGN");
 
-			    bool has_index = (in.as.assign.index.type != argument_type_none);
-			   char reg_size = in.as.assign.destination.size <= 4 ? 'w' : 'x';
+				bool has_index = (in.as.assign.index.type != argument_type_none);
+				char reg_size = in.as.assign.destination.size <= 4 ? 'w' : 'x';
 
-			    load_arg(out, 0, in.as.assign.value);
+				load_arg(out, 0, in.as.assign.value);
 
-			    if (in.as.assign.is_ref) {
-			        load_arg(out, 1, in.as.assign.destination);
-			    } else {
-			        switch (in.as.assign.destination.type) {
-			        case argument_type_local_var:
-			            fprintf(out, "   mov x1, #-%zu\n", 16 + in.as.assign.destination.as.var.offset);
-			            fprintf(out, "   add x1, x29, x1\n");
-			            break;
+				if (in.as.assign.is_ref) {
+				    load_arg(out, 1, in.as.assign.destination);
+				} else {
+				    switch (in.as.assign.destination.type) {
+				    case argument_type_local_var:
+				        fprintf(out, "   mov x1, #-%zu\n", 16 + in.as.assign.destination.as.var.offset);
+				        fprintf(out, "   add x1, x29, x1\n");
+				        break;
 
-			        case argument_type_global_var:
-			            fprintf(out, "   adrp x1, _globals@PAGE\n");
-			            fprintf(out, "   add x1, x1, _globals@PAGEOFF\n");
-			            fprintf(out, "   add x1, x1, #%zu\n", in.as.assign.destination.as.var.offset);
-			            break;
+				    case argument_type_global_var:
+				        fprintf(out, "   adrp x1, _globals@PAGE\n");
+				        fprintf(out, "   add x1, x1, _globals@PAGEOFF\n");
+				        fprintf(out, "   add x1, x1, #%zu\n", in.as.assign.destination.as.var.offset);
+				        break;
 
-			        default:
-			            unreachable;
-			        }
-			    }
+				    default:
+				        unreachable;
+				    }
+				}
 
-			    if (has_index) {
-			        load_arg(out, 2, in.as.assign.index);
-			        load_immediate(out, 3, 8, in.as.assign.destination.stride);
-			        fprintf(out, "   madd x1, x2, x3, x1\n"); // x1 += x2 * stride
-			    }
+				if (has_index) {
+				    load_arg(out, 2, in.as.assign.index);
+				    load_immediate(out, 3, 8, in.as.assign.destination.stride);
+				    fprintf(out, "   madd x1, x2, x3, x1\n"); // x1 += x2 * stride
+				}
 
-			    fprintf(out, "   str %c0, [x1]\n", reg_size);
+				fprintf(out, "   str %c0, [x1]\n", reg_size);
 
-			    if (in.as.assign.value.type == argument_type_literal &&
-			        in.as.assign.value.as.literal.type == argument_literal_type_string) {
+				if (in.as.assign.value.type == argument_type_literal &&
+				    in.as.assign.value.as.literal.type == argument_literal_type_string) {
 
-			        load_immediate(out, 0, 8, in.as.assign.value.as.literal.as.string.len);
+				    load_immediate(out, 0, 8, in.as.assign.value.as.literal.as.string.len);
 
-			        if (in.as.assign.is_ref) {
-			            // If destination is a pointer, len goes at [ptr + 8]
-			            fprintf(out, "   str w0, [x1, #8]\n");
-			        } else if (in.as.assign.destination.type == argument_type_local_var) {
-			            size_t len_offset = in.as.assign.destination.as.var.offset + 8;
-			            fprintf(out, "   str w0, [x29, #-%zu]\n", 16 + len_offset);
-			        } else if (in.as.assign.destination.type == argument_type_global_var) {
-			            fprintf(out, "   adrp x9, _globals@PAGE\n");
-			            fprintf(out, "   add x9, x9, _globals@PAGEOFF\n");
-			            fprintf(out, "   str w0, [x9, #%zu]\n", in.as.assign.destination.as.var.offset + 8);
-			        } else unreachable;
-			    }
+				    if (in.as.assign.is_ref) {
+				        // If destination is a pointer, len goes at [ptr + 8]
+				        fprintf(out, "   str w0, [x1, #8]\n");
+				    } else if (in.as.assign.destination.type == argument_type_local_var) {
+				        size_t len_offset = in.as.assign.destination.as.var.offset + 8;
+				        fprintf(out, "   str w0, [x29, #-%zu]\n", 16 + len_offset);
+				    } else if (in.as.assign.destination.type == argument_type_global_var) {
+				        fprintf(out, "   adrp x9, _globals@PAGE\n");
+				        fprintf(out, "   add x9, x9, _globals@PAGEOFF\n");
+				        fprintf(out, "   str w0, [x9, #%zu]\n", in.as.assign.destination.as.var.offset + 8);
+				    } else unreachable;
+				}
 			} break;
 
 			case INS_INTRINSIC: {
