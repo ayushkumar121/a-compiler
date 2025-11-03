@@ -1,7 +1,12 @@
-var [44]int arr;
+struct foo {
+	a int,
+	b int,
+}
 
-func main() void {
-	var int a = 1;
-	arr[a] = 10;
-	return arr[a]+"abc";
+func main() int {
+	var obj foo;
+	obj.a = 10;
+	obj.b = 20;
+	var f int = obj.a + obj.b;
+	return f;
 }

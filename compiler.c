@@ -48,6 +48,7 @@ typedef struct {
 	argument destination;
 	argument value;
 	argument index;
+	size_t offset;
 	bool is_ref;
 } instruction_assign;
 
@@ -67,6 +68,7 @@ typedef enum {
 	intrinsic_div,
 	intrinsic_ref,
 	intrinsic_index,
+	intrinsic_dot,
 } intrinsic_type;
 
 typedef struct {
@@ -179,10 +181,25 @@ void symbol_table_print(symbol_list* symbols) {
 	symbol* symbl = symbols->first;
 	while(symbl != NULL) {
 		print(symbl->identifier);
+		print(sv(":"));
+		print(type_to_string(symbl->type));
 		print(sv("->"));
 		symbl = symbl->next;
 	}
 	println(sv(""));
+}
+
+symbol* symbol_lookup(string identifier) {
+	if(symbols.last != NULL) {
+		symbol* symbl = symbols.last;
+		while(symbl != NULL) {
+			if (string_eq(symbl->identifier, identifier)) {
+				return symbl;
+			} 
+			symbl = symbl->prev;
+		}
+	}
+	return NULL;
 }
 
 void symbol_add(symbol_type symbol_type, string identifier, type type, size_t offset) {
@@ -204,18 +221,7 @@ void symbol_add(symbol_type symbol_type, string identifier, type type, size_t of
 	}
 }
 
-symbol* symbol_lookup(string identifier) {
-	if(symbols.last != NULL) {
-		symbol* symbl = symbols.last;
-		while(symbl != NULL) {
-			if (string_eq(symbl->identifier, identifier)) {
-				return symbl;
-			} 
-			symbl = symbl->prev;
-		}
-	}
-	return NULL;
-}
+size_t alignment_of_type(type type);
 
 size_t size_of_type(type type) {
 	switch(type.type) {
@@ -244,12 +250,76 @@ size_t size_of_type(type type) {
 		}
 	}
 	case type_function: return 8; // TODO: pointer size
+	case type_slice: return 16; // fat pointer
 	case type_array: return type.as.array.size * size_of_type(*type.as.array.inner);
-	case type_slice:
-	case type_struct:
-		todo("implement size_of_type")
+	case type_struct: {
+		assert(type.as.structure.complete);
+		size_t max_align = 1;
+		size_t offset = 0;
+
+		for (int i=0; i<type.as.structure.field_types.len; i++) {
+			struct type field_type = type.as.structure.field_types.ptr[i];
+			size_t field_size = size_of_type(field_type);
+			size_t field_align = alignment_of_type(field_type);
+
+			offset = align(offset, field_size);
+			offset += field_size;
+
+			max_align = max(max_align, field_align);
+		}
+		return align(offset, max_align);
+	}
 	case type_none: unreachable
 	}
+}
+
+size_t alignment_of_type(type type) {
+	switch(type.type) {
+	case type_primitive: return size_of_type(type);
+	case type_function: return 8;  // TODO: pointer size
+	case type_array: return alignment_of_type(*type.as.array.inner);
+	case type_struct: {
+		size_t max_align = 1;
+
+		for (int i=0; i<type.as.structure.field_types.len; i++) {
+			struct type field_type = type.as.structure.field_types.ptr[i];
+			size_t field_align = alignment_of_type(field_type);
+			max_align = max(max_align, field_align);
+		}
+
+		return max_align;
+	}
+	default: unreachable;
+	}
+}
+
+type type_of_field(struct_type strukt, string field_name) {
+	assert(strukt.complete);
+	for (int i=0; i<strukt.field_types.len; i++) {
+		string name = strukt.field_names.ptr[i];
+		if (string_eq(field_name, name)) {
+			return strukt.field_types.ptr[i];
+		}
+	}
+	return type_error;
+}
+
+ssize_t offset_of(struct_type strukt, string field_name) {
+	assert(strukt.complete);
+	size_t offset = 0;
+	for (int i=0; i<strukt.field_types.len; i++) {
+		struct type field_type = strukt.field_types.ptr[i];
+		size_t field_size = size_of_type(field_type);
+        offset = align(offset, field_size);
+
+		string name = strukt.field_names.ptr[i];
+		if (string_eq(field_name, name)) {
+			return offset;
+		}
+		
+		offset += field_size;
+	}
+	return -1;
 }
 
 size_t stride_of_type(type type) {
@@ -308,6 +378,7 @@ intrinsic_type intrinsic_from_expression(expression_tree tree) {
 		case operator_star: return intrinsic_mul;
 		case operator_slash: return intrinsic_div;
 		case operator_index: return intrinsic_index;
+		case operator_dot: return intrinsic_dot;
 		default: unreachable;	
 		}
 	} else if (tree.operands.len == 1) {
@@ -323,8 +394,10 @@ type type_of_struct(structure s) {
 	type typ = {0};
 	typ.type = type_struct;
 	typ.as.structure.identifier = s.identifier;
+	typ.as.structure.complete = true;
 	for (int i=0; i<s.parameters.len; i++) {
-		array_append(&typ.as.structure.parameters, s.parameters.ptr[i].type);
+		array_append(&typ.as.structure.field_names, s.parameters.ptr[i].identifier);
+		array_append(&typ.as.structure.field_types, s.parameters.ptr[i].type);
 	}
 	return typ;
 }
@@ -386,6 +459,22 @@ type type_of_expression(expression expr) {
 				assert(type.type == type_array);
 				return *type.as.array.inner;
 			}
+			case operator_dot: {
+				type type = type_of_expression(expr.as.tree.operands.ptr[0]);
+				assert(type.type == type_struct);
+				assert(type.as.structure.complete);
+
+				expression name_expr = expr.as.tree.operands.ptr[1];
+				assert(name_expr.type == expression_type_identifier);
+				string name = name_expr.as.identifier.identifier;
+				for (int i=0; i<type.as.structure.field_names.len;i++) {
+					string field_name = type.as.structure.field_names.ptr[i];
+					if (string_eq(name, field_name)) {
+						return type.as.structure.field_types.ptr[i];
+					}
+				}
+				unreachable
+			}
 			default: unreachable;
 			}
 		} else if (expr.as.tree.operands.len == 1) {
@@ -439,7 +528,6 @@ bool is_boolean_type(type a) {
 	}
 	return false; 
 }
-
 
 argument compile_expression(lexer_file_loc loc, expression expr,  size_t destination_size, size_t* stack_size) {
 	switch(expr.type) {
@@ -509,13 +597,33 @@ argument compile_expression(lexer_file_loc loc, expression expr,  size_t destina
 		ins.as.intrinsic.args = malloc(ins.as.intrinsic.argc * sizeof(argument)); 
 		
 		if (ins.as.intrinsic.argc == 2) {
-			if (!type_equal(type_of_expression(expr.as.tree.operands.ptr[0]), type_of_expression(expr.as.tree.operands.ptr[1]))) {
-				report_compiler_error(loc, sv("type mismatch in expression"));
-				return argument_error;
+			if (ins.as.intrinsic.type == intrinsic_dot) {
+				type expr_type = type_of_expression(expr.as.tree.operands.ptr[0]);
+				if (expr_type.type != type_struct) {
+					report_compiler_error(loc, sv("cannot access into expression"));
+					return argument_error;
+				}
+
+				expression field_expr = expr.as.tree.operands.ptr[1];
+				if (field_expr.type != expression_type_identifier) {
+					report_compiler_error(loc, sv("unknown expression as field name"));
+					return argument_error;
+				}
+
+				string field_name = field_expr.as.identifier.identifier;
+				int offset = offset_of(expr_type.as.structure, field_name);
+
+				ins.as.intrinsic.args[0] = compile_expression(loc, expr.as.tree.operands.ptr[0], destination_size, stack_size);
+				ins.as.intrinsic.args[1] = argument_literal_integer(4, offset);
+			} else {
+				if (!type_equal(type_of_expression(expr.as.tree.operands.ptr[0]), type_of_expression(expr.as.tree.operands.ptr[1]))) {
+					report_compiler_error(loc, sv("type mismatch in expression"));
+					return argument_error;
+				}
+				ins.as.intrinsic.args[0] = compile_expression(loc, expr.as.tree.operands.ptr[0], destination_size, stack_size);
+				ins.as.intrinsic.args[1] = compile_expression(loc, expr.as.tree.operands.ptr[1], destination_size, stack_size);
 			}
 
-			ins.as.intrinsic.args[0] = compile_expression(loc, expr.as.tree.operands.ptr[0], destination_size, stack_size);
-			ins.as.intrinsic.args[1] = compile_expression(loc, expr.as.tree.operands.ptr[1], destination_size, stack_size);
 		} else if (ins.as.intrinsic.argc == 1) {
 			ins.as.intrinsic.args[0] = compile_expression(loc, expr.as.tree.operands.ptr[0], destination_size, stack_size);
 		} else unreachable;
@@ -535,23 +643,42 @@ void add_label(int label_index) {
 	array_append(&instructions, ins);
 }
 
-void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
-	symbol_list saved = *symbols;
+void compile_scope(scope sc, size_t* stack_size) {
+	symbol_list saved = symbols;
 
 	for (int i=0; i<sc.statements.len; i++) {
 		statement stm = sc.statements.ptr[i];
 
 		switch(stm.type) {
 		case statement_type_scope: {
-			compile_scope(stm.as.scope, stack_size, symbols);
+			compile_scope(stm.as.scope, stack_size);
 		} break;
 		case statement_type_decl: {
+			symbol* symbl = symbol_lookup(stm.as.declaration.identifier);
+			if (symbl != NULL) {
+				report_compiler_error(stm.loc, tconcat(sv("redefinition of symbol "), stm.as.declaration.identifier));
+				continue;
+			}
+
+			type decl_type = stm.as.declaration.type;
+			if (decl_type.type == type_struct) {
+				symbol* type_symbl = symbol_lookup(decl_type.as.structure.identifier);
+				if (type_symbl == NULL) {
+					report_compiler_error(stm.loc, tconcat(sv("unknown type "), decl_type.as.structure.identifier));
+					continue;
+				}
+				decl_type = type_symbl->type;
+			} else if (decl_type.type == type_none) {
+				report_compiler_error(stm.loc, sv("unknown type "));
+				continue;
+			}
+
 			size_t offset = *stack_size;
-			size_t size = size_of_type(stm.as.declaration.type);
-			size_t stride = stride_of_type(stm.as.declaration.type);
+			size_t size = size_of_type(decl_type);
+			size_t stride = stride_of_type(decl_type);
 			*stack_size = *stack_size + size;
 
-			symbol_add(symbol_type_local_var, stm.as.declaration.identifier, stm.as.declaration.type, offset);
+			symbol_add(symbol_type_local_var, stm.as.declaration.identifier, decl_type, offset);
 
 			if (stm.as.declaration.value.type != expression_type_none) {
 				if (!type_equal(stm.as.declaration.type, type_of_expression(stm.as.declaration.value))) {
@@ -583,6 +710,10 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 			instruction ins = {0};
 			ins.type = INS_ASSIGN;
 
+			size_t size = size_of_type(symbl->type);
+			size_t stride = stride_of_type(symbl->type);
+			size_t offset = symbl->offset;
+
 			if (dest.type == destination_type_indexed) {
 				if (symbl_type.type != type_array) {
 					report_compiler_error(stm.loc, tconcat(sv("cannot index into type "), type_to_string(symbl_type)));
@@ -602,6 +733,20 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 				}
 			} else if (dest.type == destination_type_ref) {
 				ins.as.assign.is_ref = true;
+			} else if (dest.type == destination_type_field) {
+				if (symbl_type.type != type_struct) {
+					report_compiler_error(stm.loc, tconcat(sv("cannot access field of type "), type_to_string(symbl_type)));
+					continue;
+				}
+
+				type field_type = type_of_field(symbl_type.as.structure, dest.as.field.name);
+				ssize_t field_offset = offset_of(symbl_type.as.structure, dest.as.field.name);
+				if (field_offset == -1) {
+					report_compiler_error(stm.loc, tconcat(sv("unknwon field "), type_to_string(symbl_type)));
+					continue;
+				}
+				offset += field_offset;
+				size = size_of_type(field_type); 
 			} else if (dest.type == destination_type_variable) {
 				ins.as.assign.index.type = argument_type_none;
 				if (!type_equal(symbl_type, type_of_expression(stm.as.assignment.value))) {
@@ -609,10 +754,6 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 					continue;
 				}
 			} else unreachable;
-
-			size_t size = size_of_type(symbl->type);
-			size_t stride = stride_of_type(symbl->type);
-			size_t offset = symbl->offset;
 
 			if (symbl->symbol_type == symbol_type_global_var) {
 				ins.as.assign.destination = argument_global_var(offset, size, stride);
@@ -632,8 +773,8 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 				continue;
 			}
 
-			symbols->first = saved.first;
-			symbols->last = saved.last;
+			symbols.first = saved.first;
+			symbols.last = saved.last;
 
 			instruction ins = {0};
 			ins.type = INS_RETURN;
@@ -664,7 +805,7 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 			array_append(&instructions, ins);
 
 			add_label(0);
-			compile_scope(stm.as.iff.body, stack_size, symbols);
+			compile_scope(stm.as.iff.body, stack_size);
 			add_label(1);
 		} break;
 		case statement_type_while: {
@@ -680,7 +821,7 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 			ins.as.jmp.label = 1;
 			array_append(&instructions, ins);
 
-			compile_scope(stm.as.whil.body, stack_size, symbols);
+			compile_scope(stm.as.whil.body, stack_size);
 
 			ins.type = INS_END_WHILE;
 			ins.as.jmp.label = 0;
@@ -692,11 +833,11 @@ void compile_scope(scope sc, size_t* stack_size, symbol_list* symbols) {
 		}
 	}
 
-	symbols->first = saved.first;
-	symbols->last = saved.last;
+	symbols.first = saved.first;
+	symbols.last = saved.last;
 }
 
-void compile_function(function fn, symbol_list* symbols) {
+void compile_function(function fn) {
 	size_t* stack_size = calloc(1, sizeof(size_t));
 	instruction ins = {0};
 	ins.type = INS_FUNC_START;
@@ -704,7 +845,7 @@ void compile_function(function fn, symbol_list* symbols) {
 	ins.as.func.stack_size = stack_size;
 	array_append(&instructions, ins);
 
-	compile_scope(fn.body, stack_size, symbols);
+	compile_scope(fn.body, stack_size);
 
 	instruction ins_end = {0};
 	ins_end.type = INS_FUNC_END;
@@ -752,17 +893,38 @@ void compile_global_decl(declaration decl, size_t size) {
 intermediate_representation compile(program prg) {
 	intermediate_representation ir = {0};
 
+	for (int i=0; i<prg.structs.len; i++) {
+		structure strukt = prg.structs.ptr[i];
+		symbol* symbl = symbol_lookup(strukt.identifier);
+		if (symbl != NULL) {
+			report_compiler_error(strukt.loc, tconcat(sv("redefinition of symbl "), strukt.identifier));
+			continue;
+		}
+		type strukt_type = type_of_struct(strukt);
+		symbol_add(symbol_type_func, strukt.identifier, strukt_type, i);
+	}
+
 	size_t offset = 0;
 	for (int i=0; i<prg.globals.len; i++) {
 		declaration decl = prg.globals.ptr[i];
 		symbol* symbl = symbol_lookup(decl.identifier);
 		if (symbl != NULL) {
-			report_compiler_error(decl.loc, tconcat(sv("symbol redefinition of "), decl.identifier));
+			report_compiler_error(decl.loc, tconcat(sv("redefinition of symbl "), decl.identifier));
 			continue;
 		}
-		symbol_add(symbol_type_global_var, decl.identifier, decl.type, offset);
+		type decl_type = decl.type;
+		if (decl_type.type == type_struct) {
+			symbol* symbl = symbol_lookup(decl_type.as.structure.identifier);
+			if (symbl == NULL) {
+				report_compiler_error(decl.loc, tconcat(sv("unknown type "), decl_type.as.structure.identifier));
+				continue;
+			}
+			decl_type = symbl->type;
+		}
+
+		symbol_add(symbol_type_global_var, decl.identifier, decl_type, offset);
 		
-		size_t size = size_of_type(decl.type);
+		size_t size = size_of_type(decl_type);
 		offset += size;
 
 		compile_global_decl(decl, size);
@@ -775,21 +937,10 @@ intermediate_representation compile(program prg) {
 			report_compiler_error(fn.loc, tconcat(sv("symbol redefinition of "), fn.identifier));
 			continue;
 		}
-		compile_function(fn, &symbols);
+		compile_function(fn);
 
 		type func_type = type_of_function(fn);
 		symbol_add(symbol_type_func, fn.identifier, func_type, i);
-	}
-
-	for (int i=0; i<prg.structs.len; i++) {
-		structure strukt = prg.structs.ptr[i];
-		symbol* symbl = symbol_lookup(strukt.identifier);
-		if (symbl != NULL) {
-			report_compiler_error(strukt.loc, tconcat(sv("symbol redefinition of "), strukt.identifier));
-			continue;
-		}
-		type strukt_type = type_of_struct(strukt);
-		symbol_add(symbol_type_func, strukt.identifier, strukt_type, i);
 	}
 
 	ir.strings = string_literals;

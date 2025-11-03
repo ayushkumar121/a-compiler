@@ -198,11 +198,30 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 					fprintf(out, "   mul x0, x0, x1\n");
 
 					if (arg.type == argument_type_local_var) {
-						fprintf(out, "   mov x1, #-%zu\n", arg.as.var.offset);
+						fprintf(out, "   mov x1, #-%zu\n", 16+arg.as.var.offset);
 						fprintf(out, "   add x0, x0, x1\n");
-						fprintf(out, "  ldr %c0, [x29, x0]\n", reg_size);
+						fprintf(out, "   ldr %c0, [x29, x0]\n", reg_size);
 					} else if (arg.type == argument_type_global_var) {
 				    	fprintf(out, "   mov x1, #%zu\n", arg.as.var.offset);
+						fprintf(out, "   add x0, x0, x1\n");
+				    	fprintf(out, "   adrp x9, _globals@PAGE\n");
+	    				fprintf(out, "   add x9, x9, _globals@PAGEOFF\n");
+        				fprintf(out, "   ldr %c0, [x9, x0]\n", reg_size);
+					}
+				} break;
+
+				case intrinsic_dot: {
+					argument arg = in.as.intrinsic.args[0];
+
+					if (arg.type == argument_type_local_var) {
+						fprintf(out, "   mov x0, #-%llu\n", 
+							16+arg.as.var.offset+
+							in.as.intrinsic.args[1].as.literal.as.integer.value);
+						fprintf(out, "   ldr %c0, [x29, x0]\n", reg_size);
+					} else if (arg.type == argument_type_global_var) {
+				    	load_arg(out, 1, in.as.intrinsic.args[1]);
+
+				    	fprintf(out, "   mov x0, #%zu\n", arg.as.var.offset);
 						fprintf(out, "   add x0, x0, x1\n");
 				    	fprintf(out, "   adrp x9, _globals@PAGE\n");
 	    				fprintf(out, "   add x9, x9, _globals@PAGEOFF\n");

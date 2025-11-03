@@ -5,6 +5,7 @@ typedef struct expression expression;
 typedef struct statement statement;
 typedef struct scope scope;
 typedef struct binding binding;
+typedef struct binding_list binding_list;
 typedef struct expression expression;
 
 typedef struct {
@@ -61,8 +62,10 @@ typedef struct {
 } slice_type;
 
 typedef struct {
+	bool complete;
 	string identifier;
-	type_list parameters;
+	strings field_names;
+	type_list field_types;
 } struct_type;
 
 typedef struct {
@@ -87,11 +90,14 @@ typedef struct type {
 // end types
 
 typedef struct binding {
+	bool error;
 	type type;
 	string identifier;
 } binding;
 
-typedef struct {
+#define binding_error (binding){.error=true}
+
+typedef struct binding_list {
 	int len;
 	int cap;
 	binding* ptr;
@@ -196,6 +202,7 @@ typedef enum {
 	destination_type_variable,
 	destination_type_indexed,
 	destination_type_ref,
+	destination_type_field,
 } destination_type;
 
 typedef struct {
@@ -203,6 +210,7 @@ typedef struct {
 	string identifier;
 	union {
 		struct {expression value;} indexed;
+		struct {string name;} field;
 		struct {} var;
 	} as;
 } destination;
@@ -400,12 +408,18 @@ string type_to_string(type typ) {
 	case type_slice: return tsprintf("[]%.*s", string_arg(type_to_string(*typ.as.slice.inner)));
 	case type_array: return tsprintf("[%d]%.*s",typ.as.array.size, string_arg(type_to_string(*typ.as.array.inner)));
 	case type_struct: {
-		string s = tconcat(typ.as.structure.identifier, sv("}"));
-		for (int i=0; i<typ.as.structure.parameters.len; i++) {
-			s = tconcat(s, type_to_string(typ.as.structure.parameters.ptr[i]));
-			if (i < typ.as.structure.parameters.len-1) {
-				s = tconcat(s, sv(","));
+		string s = tconcat(typ.as.structure.identifier, sv("{"));
+		if (typ.as.structure.complete) {
+			for (int i=0; i<typ.as.structure.field_names.len; i++) {
+				s = tconcat(s, typ.as.structure.field_names.ptr[i]);
+				s = tconcat(s, sv(":"));
+				s = tconcat(s, type_to_string(typ.as.structure.field_types.ptr[i]));
+				if (i < typ.as.structure.field_names.len-1) {
+					s = tconcat(s, sv(","));
+				}
 			}
+		} else {
+			s = tconcat(s, sv("incomplete"));
 		}
 		s = tconcat(s, sv("}"));
 		return s;
@@ -562,7 +576,7 @@ type parse_type(lexer* lex) {
 	} else if (t.type == token_identifier) {
 		typ.type = type_struct;
 		typ.as.structure.identifier = t.value;
-		todo("look up parameters for struct"); 
+		typ.as.structure.complete = false;
 	} else if (t.type == token_keyword && t.keyword == keyword_func) {
 		typ.type = type_function;
 		t = lexer_next_token(lex);
@@ -599,14 +613,19 @@ type parse_type(lexer* lex) {
 // decl = type ident
 binding parse_binding(lexer* lex) {
 	binding bind = {0};
-	bind.type = parse_type(lex);
 	token t = lexer_next_token(lex);
 	if (t.type != token_identifier) {
 		report_parser_error(lex, tconcat(sv("expected identifier but got "), t.value));
 		synchronise(lex, synchronise_token_statement);
+		return binding_error;
 	} else {
 		bind.identifier = t.value;
 	}
+	type type = parse_type(lex);
+	if (type.type == type_none) {
+		return binding_error;
+	}
+	bind.type = type;
 	return bind;
 }
 
@@ -844,6 +863,9 @@ declaration parse_declaration(lexer* lex) {
 	decl.loc = lexer_current_loc(lex);
 
 	binding binding = parse_binding(lex);
+	if (binding.error) {
+		return declaration_error;
+	}
 	decl.type = binding.type;
 	decl.identifier = binding.identifier;
 
@@ -1001,6 +1023,30 @@ statement parse_statement(lexer* lex) {
 				return statement_error;
 			}
 			s.as.assignment.value = expr;
+		} else if (t.type == token_dot) {
+			lexer_next_token(lex);
+			s.type = statement_type_assign;
+			s.as.assignment.destination.type = destination_type_field;
+			s.as.assignment.destination.identifier = identifier;
+			t = lexer_next_token(lex);
+			if (t.type != token_identifier) {
+				report_parser_error(lex, tconcat(sv("expected field name got "), t.value));
+				synchronise(lex, synchronise_token_statement);
+				return statement_error;
+			}
+			s.as.assignment.destination.as.field.name = t.value;
+
+			t = lexer_next_token(lex);
+			if (t.type != token_equal) {
+				report_parser_error(lex, tconcat(sv("expected = got "), t.value));
+				synchronise(lex, synchronise_token_statement);
+				return statement_error;
+			}
+			expression expr = parse_expression(lex);
+			if (expr.type == expression_type_none) {
+				return statement_error;
+			}
+			s.as.assignment.value = expr;
 		} else if (t.type == token_left_paren) {
 			lexer_next_token(lex);
 			
@@ -1070,8 +1116,11 @@ structure parse_struct(lexer* lex) {
 
 	if (t.type == token_left_curly) {
 		while(token_not_empty_or_equals(lex, token_right_curly)) {
-			binding bind = parse_binding(lex);
- 			array_append(&s.parameters, bind);
+			binding binding = parse_binding(lex);
+			if (binding.error) {
+				return structure_error;
+			}
+ 			array_append(&s.parameters, binding);
 
  			t = lexer_peek_token(lex);
  			if (t.type == token_comma) lexer_next_token(lex);
@@ -1110,8 +1159,11 @@ function parse_function(lexer* lex) {
 
 	if (t.type == token_left_paren) {
 		while(token_not_empty_or_equals(lex, token_right_paren)) {
-			binding bind = parse_binding(lex);
- 			array_append(&func.arguments, bind);
+			binding binding = parse_binding(lex);
+			if (binding.error) {
+				return function_error;
+			}
+ 			array_append(&func.arguments, binding);
 
  			t = lexer_peek_token(lex);
  			if (t.type == token_comma) lexer_next_token(lex);
