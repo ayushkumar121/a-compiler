@@ -3,6 +3,7 @@
 typedef struct type type;
 typedef struct expression expression;
 typedef struct statement statement;
+typedef struct statement_list statement_list;
 typedef struct scope scope;
 typedef struct binding binding;
 typedef struct binding_list binding_list;
@@ -139,10 +140,6 @@ typedef struct {
 	} as;
 } expression_literal;
 
-typedef struct {
-	string identifier;
-} expression_variable;
-
 typedef struct expression_list {
 	int len;
 	int cap;
@@ -163,7 +160,7 @@ typedef struct expression {
 	expression_type type;
 	union {
 		expression_literal literal;
-		expression_variable identifier;
+		string identifier;
 		expression_tree tree;
 		expression_func_call func_call;
 	} as;
@@ -215,6 +212,12 @@ typedef struct {
 	} as;
 } destination;
 
+typedef struct statement_list {
+	int len;
+	int cap;
+	statement* ptr;
+} statement_list;
+
 typedef struct {
 	destination destination;
 	expression value;
@@ -226,11 +229,7 @@ typedef struct {
 } statement_func_call;
 
 typedef struct scope {
-	struct {
-		int len;
-		int cap;
-		statement* ptr;
-	} statements;
+	statement_list statements;
 } statement_scope;
 
 typedef struct {
@@ -239,12 +238,12 @@ typedef struct {
 
 typedef struct {
 	expression condition;
-	statement_scope body;
+	statement_list body;
 } statement_if;
 
 typedef struct {
 	expression condition;
-	statement_scope body;
+	statement_list body;
 } statement_while;
 
 typedef struct statement {
@@ -268,7 +267,7 @@ typedef struct {
 	string identifier;
 	type return_type;
 	binding_list arguments;
-	statement_scope body;
+	statement_list body;
 	lexer_file_loc loc;
 } function;
 
@@ -415,11 +414,11 @@ string type_to_string(type typ) {
 				s = tconcat(s, sv(":"));
 				s = tconcat(s, type_to_string(typ.as.structure.field_types.ptr[i]));
 				if (i < typ.as.structure.field_names.len-1) {
-					s = tconcat(s, sv(","));
+					s = tconcat(s, sv(", "));
 				}
 			}
 		} else {
-			s = tconcat(s, sv("incomplete"));
+			s = tconcat(s, sv("..."));
 		}
 		s = tconcat(s, sv("}"));
 		return s;
@@ -474,7 +473,7 @@ string expression_to_string(expression expr) {
 		s = tconcat(s, sv(")"));
 		return s;
 	}
-	case expression_type_identifier: return expr.as.identifier.identifier;
+	case expression_type_identifier: return expr.as.identifier;
 	case expression_type_tree: {
 		string s = sv("(");
 		s = tconcat(s, operator_to_string(expr.as.tree.op));
@@ -487,6 +486,46 @@ string expression_to_string(expression expr) {
 		return s;
 	}
 	}
+}
+
+// type helpers
+
+type type_of_struct(structure s) {
+	type typ = {0};
+	typ.type = type_struct;
+	typ.as.structure.identifier = s.identifier;
+	typ.as.structure.complete = true;
+	for (int i=0; i<s.parameters.len; i++) {
+		array_append(&typ.as.structure.field_names, s.parameters.ptr[i].identifier);
+		array_append(&typ.as.structure.field_types, s.parameters.ptr[i].type);
+	}
+	return typ;
+}
+
+type type_of_function(function fn) {
+	type typ = {0};
+	typ.type = type_function;
+	typ.as.function.return_type = malloc(sizeof(type));
+	*(typ.as.function.return_type) = fn.return_type;
+	for (int i=0; i<fn.arguments.len; i++) {
+		array_append(&typ.as.function.arguments, fn.arguments.ptr[i].type);
+	}
+	return typ;
+}
+
+type type_of_primitive(primitive_type primitive) {
+	type typ = {0};
+	typ.type = type_primitive;
+	typ.as.primitive = primitive;
+	return typ;
+}
+
+type type_of_wrapped(wrapped_type_type wrapped_type, type* inner) {
+	type typ = {0};
+	typ.type = type_wrapped;
+	typ.as.wrapped.type = wrapped_type;
+	typ.as.wrapped.inner = inner;
+	return typ;
 }
 
 // Parsers
@@ -714,7 +753,7 @@ expression parse_expression_atom(lexer* lex) {
 			lexer_next_token(lex);
 		} else {
 			ex.type = expression_type_identifier;
-			ex.as.identifier.identifier = t.value;
+			ex.as.identifier = t.value;
 		}
 	} break;
 	default: {
@@ -922,14 +961,14 @@ statement parse_statement(lexer* lex) {
 			while(token_not_empty_or_equals(lex, token_right_curly)) {
 				statement st = parse_statement(lex);
 				if (st.type != statement_type_none) {
-					array_append(&(s.as.iff.body.statements), st);
+					array_append(&(s.as.iff.body), st);
 				}
 			}
 			lexer_next_token(lex);
 		} else {
 			statement st = parse_statement(lex);
 			if (st.type != statement_type_none) {
-				array_append(&(s.as.iff.body.statements), st);
+				array_append(&(s.as.iff.body), st);
 			}
 		}
 	} else if (t.type == token_keyword && t.keyword == keyword_while) {
@@ -946,14 +985,14 @@ statement parse_statement(lexer* lex) {
 			while(token_not_empty_or_equals(lex, token_right_curly)) {
 				statement st = parse_statement(lex);
 				if (st.type != statement_type_none) {
-					array_append(&(s.as.whil.body.statements), st);
+					array_append(&(s.as.whil.body), st);
 				}
 			}
 			lexer_next_token(lex);
 		} else {
 			statement st = parse_statement(lex);
 			if (st.type != statement_type_none) {
-				array_append(&(s.as.whil.body.statements), st);
+				array_append(&(s.as.whil.body), st);
 			}
 		}
 	} else if (t.type == token_keyword && (t.keyword == keyword_var || t.keyword == keyword_const)) {
@@ -1122,14 +1161,8 @@ structure parse_struct(lexer* lex) {
 			}
  			array_append(&s.parameters, binding);
 
- 			t = lexer_peek_token(lex);
- 			if (t.type == token_comma) lexer_next_token(lex);
- 			else if (t.type == token_right_curly) break;
- 			else {
- 				report_parser_error(lex, tconcat(sv("expected } but got "), t.value));
- 				synchronise(lex, synchronise_token_struct);
- 				return structure_error;
- 			}
+			// consuming semicolon
+			if (lexer_peek_token(lex).type == token_semicolon) lexer_next_token(lex);
 		}
 		lexer_next_token(lex);
 	} else {
@@ -1200,7 +1233,7 @@ function parse_function(lexer* lex) {
 
 	while(token_not_empty_or_equals(lex, token_right_curly)) {
 		statement st = parse_statement(lex);
-		if(st.type != statement_type_none) array_append(&(func.body.statements), st);
+		if(st.type != statement_type_none) array_append(&(func.body), st);
 	}
 	lexer_next_token(lex);
 

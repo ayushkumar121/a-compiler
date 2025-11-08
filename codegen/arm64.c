@@ -17,311 +17,153 @@ void load_immediate(FILE* out, int reg, size_t size, size_t value) {
 	}
 }
 
-void load_arg(FILE* out, int reg, argument arg) {
-	switch(arg.type) {
-	case argument_type_none: break;
+void load_arg(FILE* out, int reg, argument src) {
+	char reg_size = src.size <= 4 ? 'w' : 'x';
 
-	case argument_type_literal: {
-    	switch(arg.as.literal.type) {
-    	case argument_literal_type_integer: {
-	    	load_immediate(out, reg, arg.size, arg.as.literal.as.integer.value);
-    	} break;
-    	case argument_literal_type_string: {
-    		fprintf(out, "   adrp x9, .S%zu@PAGE\n", arg.as.literal.as.string.offset);
-	    	fprintf(out, "   add x%d, x9, .S%zu@PAGEOFF\n", reg, arg.as.literal.as.string.offset);
-    	} break;
-    	}
-	} break;
+	switch(src.type) {
+	case argument_literal:
+		if (src.value_type == argument_value_int) {
+			load_immediate(out, reg, src.size, src.value);
+		} else todo("implement argument_literal loading");
+		break;
 
-	case argument_type_local_var: {
-		char reg_size = arg.size <= 4 ? 'w' : 'x';
-		fprintf(out, "   ldr %c%d, [x29, #-%zu]\n", reg_size, reg, 16+arg.as.var.offset);
-	} break;
+	case argument_local:
+		fprintf(out, "   ldr %c%d, [x29, #-%zu]\n", reg_size, reg, 16+src.offset);
+		break;
 
-	case argument_type_global_var: {
-	    char reg_size = arg.size <= 4 ? 'w' : 'x';
+	case argument_global:
 	    fprintf(out, "   adrp x9, _globals@PAGE\n");
 	    fprintf(out, "   add x9, x9, _globals@PAGEOFF\n");
-	    fprintf(out, "   ldr %c%d, [x9, #%zu]\n", reg_size, reg, arg.as.var.offset);
-	} break;	
+	    fprintf(out, "   ldr %c%d, [x9, #%zu]\n", reg_size, reg, src.offset);
+		break;
+
+	default: unreachable;
+	}
+}
+
+void store_arg(FILE* out, int reg, argument dst, int offset) {
+	char reg_size = dst.size <= 4? 'w':'x';
+	switch(dst.type) {
+	case argument_local:
+		fprintf(out, "   str %c%d, [x29, #-%zu]\n", reg_size, reg, 16+dst.offset+offset);
+		break;
+
+	case argument_global:
+    	fprintf(out, "   adrp x9, _globals@PAGE\n");
+		fprintf(out, "   add x9, x9, _globals@PAGEOFF\n");
+		fprintf(out, "   add %c%d, x9, #%zu\n", reg_size, reg, dst.offset+offset);
+		break;
+
+	default: unreachable;
 	}
 }
 
 void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
-	print(sv("info: generating ")); println(asm_path);
-
+	fprintf(stderr, "info: generating %.*s\n", string_arg(asm_path));
 	FILE* out = fopen(asm_path.ptr, "w+");
 
 	fprintf(out, ".text\n");
 	fprintf(out, ".global _start\n\n");
 	fprintf(out, "_start:\n");
-	fprintf(out, "   bl main\n");
+	fprintf(out, "   bl _main\n");
 	fprintf(out, "   movz x16, #0x1\n");
 	fprintf(out, "   movk x16, #0x200, lsl #16\n");
 	fprintf(out, "   svc #0\n");
 
-	fprintf(out, "write:\n");
-	fprintf(out, "   movz x16, #04\n");
-	fprintf(out, "   movk x16, #0x200, lsl #16\n");
-	fprintf(out, "   svc #0\n");
-	fprintf(out, "   ret\n");
-
-	fprintf(out, "len:\n");
-	fprintf(out, "   ldr x0, [x0, #8]\n");
-	fprintf(out, "   ret\n");
-	fprintf(out, "\n");
-
-	string current_func_name = sv("");
+	string current_func_name;
+	size_t frame_size;
 	for (int i=0; i<ir.instructions.len; i++) {
 		instruction in = ir.instructions.ptr[i];
 		switch(in.type){
-			case INS_FUNC_START: {
-				fprintf(out, "; INS_FUNC_START\n");
+		case INS_FUNC_START: {
+			current_func_name = in.label;
 
-				current_func_name = in.as.func.identifier;
-				fprintf(out, "%.*s:\n", string_arg(current_func_name));
-				fprintf(out, "   stp x29, x30, [sp, #-16]!\n");
-				fprintf(out, "   mov x29, sp\n");
-				assert(in.as.func.stack_size != NULL);
-				size_t stack_size = align(*in.as.func.stack_size, 16);
-				fprintf(out, "   sub sp, sp, #%zu\n", stack_size);
-			}	break;
+			fprintf(out, "; INS_FUNC_START\n");
+			fprintf(out, "_%.*s:\n", string_arg(current_func_name));
+			fprintf(out, "   stp x29, x30, [sp, #-16]!\n");
+			fprintf(out, "   mov x29, sp\n");
+			assert(in.as.func.frame != NULL);
+			frame_size = align(in.as.func.frame->size, 16);
+			fprintf(out, "   sub sp, sp, #%zu\n", frame_size);
+		} break;
+		case INS_RET: {
+			fprintf(out, "; INS_RET\n");
+			load_arg(out, 0, in.as.op.dst);
+			fprintf(out, "   b .Lreturn_%.*s\n", string_arg(current_func_name));
+		} break;
+		case INS_FUNC_END: {
+			fprintf(out, "; INS_FUNC_END\n");
 
-			case INS_FUNC_END: {
-				fprintf(out, "; INS_FUNC_END\n");
+			fprintf(out, ".Lreturn_%.*s:\n", string_arg(current_func_name));
+			size_t stack_size = align(frame_size, 16);
+			fprintf(out, "   add sp, sp, #%zu\n", stack_size);
+			fprintf(out, "   ldp x29, x30, [sp], #16\n");
+			fprintf(out, "   ret\n");
+		} break;
+		case INS_LEA: {
+			fprintf(out, "; INS_LEA\n");
+			switch(in.as.op.src1.type) {
+			case argument_local:
+				fprintf(out, "   sub x0, x29, #%zu\n", 16+in.as.op.src1.offset);
+				break;
 
-				fprintf(out, ".Lreturn_%.*s:\n", string_arg(current_func_name));
-				size_t stack_size = align(*in.as.func.stack_size, 16);
-				assert(in.as.func.stack_size != NULL);
-			    fprintf(out, "   add sp, sp, #%zu\n", stack_size);
-				fprintf(out, "   ldp x29, x30, [sp], #16\n");
-				fprintf(out, "   ret\n");
-			} break;
+			case argument_global:
+		    	fprintf(out, "   adrp x0, _globals@PAGE\n");
+				fprintf(out, "   add x0, x0, _globals@PAGEOFF\n");
+				fprintf(out, "   add x0, x0, #%zu\n", in.as.op.src1.offset);
+				break;
 
-			case INS_ASSIGN: {
-				fprintf(out, "; %s\n", "INS_ASSIGN");
+			default: unreachable;
+			}
+			store_arg(out, 0, in.as.op.dst, 0);
+		} break;
+		case INS_COPY: {
+			fprintf(out, "; INS_COPY\n");
 
-				bool has_index = (in.as.assign.index.type != argument_type_none);
-				char reg_size = in.as.assign.destination.size <= 4 ? 'w' : 'x';
+			load_arg(out, 0, in.as.op.dst); // src = x0
+			load_arg(out, 1, in.as.op.src1); // dst = x1
+			assert(in.as.op.src2.type == argument_literal);
+			load_immediate(out, 2, 8, in.as.op.src2.value); // bytes remaining
+		    fprintf(out, "   mov x3, #0\n"); // offset = 0
+		    fprintf(out, "1:\n");
+		    fprintf(out, "   ldrb w6, [x1, x3]\n"); // load byte from src
+		    fprintf(out, "   strb w6, [x0, x3]\n"); // store byte to dst
+		    fprintf(out, "   add x3, x3, #1\n"); // offset++
+		    fprintf(out, "   cmp x3, x2\n"); // check if done
+		    fprintf(out, "   b.lt 1b\n");  // loop if offset < size
+		} break;
+		case INS_LSTR: {
+			assert(in.as.op.src1.type == argument_string);
+			string str = ir.strings.ptr[in.as.op.src1.offset];
 
-				load_arg(out, 0, in.as.assign.value);
+			load_immediate(out, 0, 8, str.len);
+			store_arg(out, 0, in.as.op.dst, 0);
 
-				if (in.as.assign.is_ref) {
-				    load_arg(out, 1, in.as.assign.destination);
-				} else {
-				    switch (in.as.assign.destination.type) {
-				    case argument_type_local_var:
-				        fprintf(out, "   mov x1, #-%zu\n", 16 + in.as.assign.destination.as.var.offset);
-				        fprintf(out, "   add x1, x29, x1\n");
-				        break;
+	    	fprintf(out, "   adrp x0, .LC%zu@PAGE\n", in.as.op.src1.offset);
+			fprintf(out, "   add x0, x0, .LC%zu@PAGEOFF\n", in.as.op.src1.offset);
 
-				    case argument_type_global_var:
-				        fprintf(out, "   adrp x1, _globals@PAGE\n");
-				        fprintf(out, "   add x1, x1, _globals@PAGEOFF\n");
-				        fprintf(out, "   add x1, x1, #%zu\n", in.as.assign.destination.as.var.offset);
-				        break;
-
-				    default:
-				        unreachable;
-				    }
-				}
-
-				if (has_index) {
-				    load_arg(out, 2, in.as.assign.index);
-				    load_immediate(out, 3, 8, in.as.assign.destination.stride);
-				    fprintf(out, "   madd x1, x2, x3, x1\n"); // x1 += x2 * stride
-				}
-
-				fprintf(out, "   str %c0, [x1]\n", reg_size);
-
-				if (in.as.assign.value.type == argument_type_literal &&
-				    in.as.assign.value.as.literal.type == argument_literal_type_string) {
-
-				    load_immediate(out, 0, 8, in.as.assign.value.as.literal.as.string.len);
-
-				    if (in.as.assign.is_ref) {
-				        // If destination is a pointer, len goes at [ptr + 8]
-				        fprintf(out, "   str w0, [x1, #8]\n");
-				    } else if (in.as.assign.destination.type == argument_type_local_var) {
-				        size_t len_offset = in.as.assign.destination.as.var.offset + 8;
-				        fprintf(out, "   str w0, [x29, #-%zu]\n", 16 + len_offset);
-				    } else if (in.as.assign.destination.type == argument_type_global_var) {
-				        fprintf(out, "   adrp x9, _globals@PAGE\n");
-				        fprintf(out, "   add x9, x9, _globals@PAGEOFF\n");
-				        fprintf(out, "   str w0, [x9, #%zu]\n", in.as.assign.destination.as.var.offset + 8);
-				    } else unreachable;
-				}
-			} break;
-
-			case INS_INTRINSIC: {
-				fprintf(out, "; INS_INTRINSIC\n");
-				char reg_size = in.as.intrinsic.destination.size <= 4 ? 'w' : 'x';
-				switch(in.as.intrinsic.type) {
-
-				case intrinsic_add:
-					load_arg(out, 0, in.as.intrinsic.args[0]);
-					load_arg(out, 1, in.as.intrinsic.args[1]);
-					fprintf(out, "   add %1$c0, %1$c0, %1$c1\n", reg_size);
-					break;
-				case intrinsic_sub:
-					load_arg(out, 0, in.as.intrinsic.args[0]);
-					load_arg(out, 1, in.as.intrinsic.args[1]);
-					fprintf(out, "   sub %1$c0, %1$c0, %1$c1\n", reg_size);
-					break;
-				case intrinsic_mul:
-					load_arg(out, 0, in.as.intrinsic.args[0]);
-					load_arg(out, 1, in.as.intrinsic.args[1]);
-					fprintf(out, "   mul %1$c0, %1$c0, %1$c1\n", reg_size);
-					break;
-				case intrinsic_div: 
-					load_arg(out, 0, in.as.intrinsic.args[0]);
-					load_arg(out, 1, in.as.intrinsic.args[1]);
-					fprintf(out, "   sdiv %1$c0, %1$c0, %1$c1\n", reg_size);
-					break;
-
-				case intrinsic_ref: {
-					argument arg = in.as.intrinsic.args[0];
-					if (arg.type == argument_type_local_var) {
-						fprintf(out, "   sub x0, x29, #%zu\n", 16+arg.as.var.offset);
-					} else if (arg.type == argument_type_global_var) {
-				    	fprintf(out, "   adrp x9, _globals@PAGE\n");
-	    				fprintf(out, "   add x9, x9, _globals@PAGEOFF\n");
-        				fprintf(out, "   add x0, x9, #%zu\n", arg.as.var.offset);
-					}
-				} break;
-
-			    case intrinsic_index: {
-			    	argument arg = in.as.intrinsic.args[0];
-
-			    	load_immediate(out, 0, 8, arg.stride);
-			    	load_arg(out, 1, in.as.intrinsic.args[1]);
-					fprintf(out, "   mul x0, x0, x1\n");
-
-					if (arg.type == argument_type_local_var) {
-						fprintf(out, "   mov x1, #-%zu\n", 16+arg.as.var.offset);
-						fprintf(out, "   add x0, x0, x1\n");
-						fprintf(out, "   ldr %c0, [x29, x0]\n", reg_size);
-					} else if (arg.type == argument_type_global_var) {
-				    	fprintf(out, "   mov x1, #%zu\n", arg.as.var.offset);
-						fprintf(out, "   add x0, x0, x1\n");
-				    	fprintf(out, "   adrp x9, _globals@PAGE\n");
-	    				fprintf(out, "   add x9, x9, _globals@PAGEOFF\n");
-        				fprintf(out, "   ldr %c0, [x9, x0]\n", reg_size);
-					}
-				} break;
-
-				case intrinsic_dot: {
-					argument arg = in.as.intrinsic.args[0];
-
-					if (arg.type == argument_type_local_var) {
-						fprintf(out, "   mov x0, #-%llu\n", 
-							16+arg.as.var.offset+
-							in.as.intrinsic.args[1].as.literal.as.integer.value);
-						fprintf(out, "   ldr %c0, [x29, x0]\n", reg_size);
-					} else if (arg.type == argument_type_global_var) {
-				    	load_arg(out, 1, in.as.intrinsic.args[1]);
-
-				    	fprintf(out, "   mov x0, #%zu\n", arg.as.var.offset);
-						fprintf(out, "   add x0, x0, x1\n");
-				    	fprintf(out, "   adrp x9, _globals@PAGE\n");
-	    				fprintf(out, "   add x9, x9, _globals@PAGEOFF\n");
-        				fprintf(out, "   ldr %c0, [x9, x0]\n", reg_size);
-					}
-				} break;
-				}
-				fprintf(out, "   str %c0, [x29, #-%zu]\n", reg_size, 16+in.as.intrinsic.destination.as.var.offset);
-			} break;
-
-			case INS_RETURN: {
-				fprintf(out, "; INS_RETURN\n");
-			    load_arg(out, 0, in.as.ret.value);
-			    fprintf(out, "   b .Lreturn_%.*s\n", string_arg(current_func_name));
-			} break;
-
-			case INS_CALL: {
-				fprintf(out, "; INS_CALL\n");
-
-				if (in.as.func_call.argc > 8) {
-					todo("support func call with more than 8 args");
-				}
-				for (int i=0; i<in.as.func_call.argc; i++) {
-					load_arg(out, i, in.as.func_call.args[i]);
-				}
-
-				fprintf(out, "   bl %.*s\n", string_arg(in.as.func_call.identifier));
-
-				if (in.as.func_call.destination.type == argument_type_local_var) {
-					fprintf(out, "   str x0, [x29, #-%zu]\n", 16+in.as.func_call.destination.as.var.offset);
-				} else if (in.as.func_call.destination.type == argument_type_global_var) {
-				    fprintf(out, "   adrp x9, _globals@PAGE\n");
-	    			fprintf(out, "   add x9, x9, _globals@PAGEOFF\n");
-					fprintf(out, "   str x0, [x9, #%zu]\n", in.as.func_call.destination.as.var.offset);
-				}
-			} break;
-
-			case INS_LABEL: {
-				fprintf(out, "; INS_LABEL\n");
-				fprintf(out, "%d:\n", in.as.label.index);
-			} break;
-
-			case INS_IF: {
-				fprintf(out, "; INS_IF\n");
-				load_arg(out, 0, in.as.jmp.condition);
-				fprintf(out, "   cmp w0, #0\n");
-				fprintf(out, "   b.eq %df\n", in.as.jmp.label);
-				fprintf(out, "   b.lt %df\n", in.as.jmp.label);
-			} break;
-
-			case INS_WHILE: {
-				fprintf(out, "; INS_WHILE\n");
-				load_arg(out, 0, in.as.jmp.condition);
-				fprintf(out, "   cmp w0, #0\n");
-				fprintf(out, "   b.eq %df\n", in.as.jmp.label);
-				fprintf(out, "   b.lt %df\n", in.as.jmp.label);
-			} break;
-
-			case INS_END_WHILE: {
-				fprintf(out, "; INS_END_WHILE\n");
-				fprintf(out, "   b %db\n", in.as.jmp.label);
-			} break;
-
-			default: unreachable
+			store_arg(out, 0, in.as.op.dst, 8);
+		} break;
+		case INS_STORE: {
+			load_arg(out, 0, in.as.op.src1);
+			store_arg(out, 0, in.as.op.dst, 0);
+		} break;
+		case INS_ADD: {
+			load_arg(out, 0, in.as.op.src1);
+			load_arg(out, 1, in.as.op.src2);
+			fprintf(out, "   add x0, x0, x1\n");
+			store_arg(out, 0, in.as.op.dst, 0);
+		} break;
+		default: {
+			printf("%d\n", in.type);
+			unreachable;
+		}
 		}
 	}
 
-	fprintf(out, "\n.data\n");
-	fprintf(out, "_globals:\n");
-	for (int i=0; i<ir.globals.len; i++) {
-		global glb = ir.globals.ptr[i];
-		fprintf(out, "%.*s:\n", string_arg(glb.identifier));
-		
-		if (glb.value.type == global_value_type_number) {
-			if (glb.size == 1) {
-				fprintf(out, ".align 0\n");
-				fprintf(out, "  .byte %zu\n", glb.value.as.number);
-			} else {
-				fprintf(out, ".balign %zu\n", glb.size);
-				fprintf(out, "  .%zubyte %zu\n", glb.size, glb.value.as.number);
-			}
-		} else if (glb.value.type == global_value_type_string) {
-			fprintf(out, ".align 3\n");
-			fprintf(out, "  .xword .S%zu\n", glb.value.as.string.offset);
-			fprintf(out, "  .xword %zu\n", glb.value.as.string.size);
-		} else if (glb.value.type == global_value_type_array) {
-			fprintf(out, "  .byte ");
-			for (int i=0; i<glb.value.as.array.len; i++) {
-				fprintf(out, "  %x", glb.value.as.array.data[i]);
-			}
-			fprintf(out, "\n");
-		} else {
-			fprintf(out, "  .space %zu\n", glb.size);
-		}
-	}
-
-	fprintf(out, "\n.align 0\n");
-	fprintf(out, "_strings:\n");
+	fprintf(out, ".section __TEXT,__cstring,cstring_literals\n");
 	for (int i=0; i<ir.strings.len; i++) {
-		fprintf(out, ".S%d:\n", i);
+		fprintf(out, ".LC%d:\n", i);
 		fprintf(out, "  .string \"%.*s\"\n", string_arg(string_unescape(ir.strings.ptr[i])));
 	}
 
@@ -329,7 +171,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 }
 
 void exegen_for_arm64_macos(string exe_path, string asm_path) {
-	print(sv("info: generating ")); println(exe_path);
+	fprintf(stderr, "info: generating %.*s\n", string_arg(exe_path));
 
 	cmd(tsprintf("as -o %.*s.o %.*s", 
 		string_arg(exe_path), string_arg(asm_path)));

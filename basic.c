@@ -108,6 +108,7 @@ _Thread_local size_t temp_allocated = 0;
 _Thread_local char temp_buffer[TEMP_BUFFER_CAP];
 
 size_t align(size_t size, size_t alignment) {
+  assert(alignment != 0);
   if (size % alignment == 0)
     return size;
   return size + (alignment - size % alignment);
@@ -165,6 +166,14 @@ const char* string_to_cstr(string s) {
 int64_t string_to_number(string s) {
   const char* cstr = string_to_cstr(s);
   return (int64_t)strtoll(cstr, (char **)NULL, 10);
+}
+
+string strconcat(string a, string b) {
+  char* ptr = malloc(a.len+b.len+1);
+  memcpy(ptr, a.ptr, a.len);
+  memcpy(ptr+a.len, b.ptr, b.len);
+  ptr[a.len+b.len] = 0;
+  return (string){a.len+b.len, ptr};
 }
 
 char character_escape(string s) {
@@ -458,6 +467,6 @@ void report_error_old(string message) {
 }
 
 void cmd(string command) {
-  println(tsprintf("CMD: %.*s", string_arg(command)));
+  fprintf(stderr, "CMD: %.*s\n", string_arg(command));
   system(string_to_cstr(command));
 }
