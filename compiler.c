@@ -7,8 +7,16 @@ typedef enum {
 	argument_string,
 } argument_type;
 
+typedef enum {
+ argument_value_int,
+ argument_value_ref,
+ argument_value_float,
+ argument_value_aggregate,
+} argument_value_type;
+
 typedef struct {
 	argument_type type;
+	argument_value_type value_type;
 	string name;
 	// bool signed;
 	size_t offset;
@@ -34,6 +42,7 @@ typedef enum {
     INS_ADD,
     INS_SUB,
     INS_MUL,
+    INS_MADD,
     INS_DIV,
     INS_CALL,
     INS_RET,
@@ -69,7 +78,7 @@ typedef struct {
 	instruction_type type;
 	string label;
 	union {
-		struct {argument dst, src1, src2;} op;
+		struct {argument dst, src1, src2, src3;} op;
 		struct {frame* frame;} func;
 		struct {argument dst; argument_list params;} call;
 	} as;
@@ -111,6 +120,19 @@ typedef struct {
 	symbol* last;
 } symbol_table;
 
+string argument_value_to_string(argument_value_type arg_type) { 
+	switch(arg_type) {
+	case argument_value_int: 
+		return sv("int");
+	case argument_value_ref: 
+		return sv("ref");
+	case argument_value_float:
+		return sv("float");
+	case argument_value_aggregate:
+		return sv("aggregate");
+	}
+}
+
 string argument_to_string(argument arg) {
 	switch(arg.type) {
 	case argument_none: 
@@ -118,17 +140,17 @@ string argument_to_string(argument arg) {
 	case argument_string: 
 		return tsprintf("string(index=%zu)", arg.offset);
 	case argument_literal: 
-		return tsprintf("literal(size=%zu alignment=%zu value=%zu)", 
-			arg.size, arg.alignment, arg.value);
+		return tsprintf("literal(value_type=%.*s size=%zu alignment=%zu value=%zu)", 
+			string_arg(argument_value_to_string(arg.value_type)), arg.size, arg.alignment, arg.value);
 	case argument_param: 
-		return tsprintf("param(name=%.*s index=%zu size=%zu alignment=%zu)", 
-			string_arg(arg.name), arg.offset, arg.size, arg.alignment); break;
+		return tsprintf("param(name=%.*s value_type=%.*s index=%zu size=%zu alignment=%zu)", 
+			string_arg(arg.name), string_arg(argument_value_to_string(arg.value_type)), arg.offset, arg.size, arg.alignment); break;
 	case argument_local: 
-		return tsprintf("local(name=%.*s offset=%zu size=%zu alignment=%zu)", 
-			string_arg(arg.name), arg.offset, arg.size, arg.alignment); break;
+		return tsprintf("local(name=%.*s value_type=%.*s offset=%zu size=%zu alignment=%zu)", 
+			string_arg(arg.name),  string_arg(argument_value_to_string(arg.value_type)), arg.offset, arg.size, arg.alignment); break;
 	case argument_global:
-		return tsprintf("global(name=%.*s offset=%zu size=%zu alignment=%zu)", 
-			string_arg(arg.name), arg.offset, arg.size, arg.alignment); break;
+		return tsprintf("global(name=%.*s value_type=%.*s offset=%zu size=%zu alignment=%zu)", 
+			string_arg(arg.name), string_arg(argument_value_to_string(arg.value_type)), arg.offset, arg.size, arg.alignment); break;
 	}
 }
 
@@ -155,6 +177,7 @@ void print_instruction(instruction in) {
     case INS_ADD: printf("INS_ADD"); break;
     case INS_SUB: printf("INS_SUB"); break;
     case INS_MUL: printf("INS_MUL"); break;
+    case INS_MADD: printf("INS_MADD"); break;
     case INS_DIV: printf("INS_DIV"); break;
     case INS_CALL: printf("INS_CALL"); break;
     case INS_RET: printf("INS_RET"); break;
@@ -186,10 +209,11 @@ void print_instruction(instruction in) {
 	} else if (in.type == INS_RET) {
 		printf("\tvalue=%.*s\n", string_arg(argument_to_string(in.as.op.dst)));
 	} else {
-		printf("\tdst=%.*s\n\tsrc1=%.*s\n\tsrc2=%.*s\n", 
+		printf("\tdst=%.*s\n\tsrc1=%.*s\n\tsrc2=%.*s\n\tsrc3=%.*s\n", 
 			string_arg(argument_to_string(in.as.op.dst)),
 			string_arg(argument_to_string(in.as.op.src1)),
-			string_arg(argument_to_string(in.as.op.src2)));
+			string_arg(argument_to_string(in.as.op.src2)),
+			string_arg(argument_to_string(in.as.op.src3)));
 	}
 	printf("}\n");
 }
@@ -252,16 +276,16 @@ void symbol_add(symbol_type symbol_type, string identifier, type type, size_t of
 	}
 }
 
-argument frame_allocate(argument_type arg_type, frame* fr, string identifier, size_t size, size_t alignment) {
+argument frame_allocate(frame* fr, argument_type arg_type, argument_value_type value_type, string identifier, size_t size, size_t alignment) {
 	size_t offset = fr->size;
 	fr->size += align(size, alignment);
 	frame_local local = {.identifier=identifier, .offset=offset, .size=size, .alignment=alignment};
 	array_append(&fr->locals, local);
-	return (argument){.type=arg_type, .name=identifier, .offset=offset, .size=size, .alignment=alignment};
+	return (argument){.type=arg_type, .value_type=value_type, .name=identifier, .offset=offset, .size=size, .alignment=alignment};
 }
 
-argument frame_allocate_temp(frame* fr, size_t size, size_t alignment) {
-	return frame_allocate(argument_local, fr, tsprintf("t%zu", (fr->temp_count)++), size, alignment);
+argument frame_allocate_temp(frame* fr, argument_value_type value_type, size_t size, size_t alignment) {
+	return frame_allocate(fr, argument_local, value_type, tsprintf("t%zu", (fr->temp_count)++), size, alignment);
 }
 
 size_t alignment_of_type(type type);
@@ -309,7 +333,8 @@ size_t size_of_type(type type) {
 		}
 		return align(offset, max_align);
 	}
-	default: todo("implement alignment_of_type for the type");
+	case type_array: return type.as.array.size*size_of_type(*type.as.array.inner);
+	default: todo("implement size_of_type for the type");
 	}
 }
 
@@ -327,6 +352,7 @@ size_t alignment_of_type(type type) {
 		}
 		return max_align;
 	}
+	case type_array: return alignment_of_type(*type.as.array.inner);
 	default: todo("implement alignment_of_type for the type");
 	}
 }
@@ -414,7 +440,7 @@ argument compile_expression(lexer_file_loc loc, expression expr, frame* fr) {
 		case expression_literal_string: {
 			instruction in = {0};
 			in.type = INS_LSTR;
-			in.as.op.dst = frame_allocate_temp(fr, 16, 8);
+			in.as.op.dst = frame_allocate_temp(fr, argument_value_aggregate, 16, 8);
 			in.as.op.src1 = (argument){.type=argument_string, .offset=string_literals.len};
 			array_append(&string_literals, expr.as.literal.as.string);
 			array_append(&instructions, in);
@@ -444,7 +470,11 @@ argument compile_expression(lexer_file_loc loc, expression expr, frame* fr) {
 		instruction in = {0};
 		in.type = INS_CALL;
 		in.label = func_call.identifier;
-		in.as.call.dst = frame_allocate_temp(fr, size_of_type(return_type), alignment_of_type(return_type));
+
+		size_t size = size_of_type(return_type);
+		size_t alignment = alignment_of_type(return_type);
+		argument_value_type value_type = (size<=8)?argument_value_int:argument_value_aggregate;
+		in.as.call.dst = frame_allocate_temp(fr, value_type, size, alignment);
 
 		if (func_call.expressions.len != symbl->type.as.function.arguments.len) {
 			report_compiler_error(loc, tsprintf("expected %d argument(s) for function %.*s", symbl->type.as.function.arguments.len, string_arg(func_call.identifier)));
@@ -509,18 +539,19 @@ argument compile_expression(lexer_file_loc loc, expression expr, frame* fr) {
 					return argument_error;
 				}
 
-				argument strukt = symbol_to_argument(loc, symbl);
-				if (strukt.type == argument_none) {
+				argument base = symbol_to_argument(loc, symbl);
+				if (base.type == argument_none) {
 					return argument_error;
 				}
 
-				argument t0 = frame_allocate_temp(fr, 8, 8);  // TODO: size of pointer
-				argument t1 = frame_allocate_temp(fr, field.size, field.alignment);
+				argument t0 = frame_allocate_temp(fr, argument_value_ref, 8, 8);  // TODO: size of pointer
+				argument_value_type value_type = (field.size<=8)?argument_value_int:argument_value_aggregate;
+				argument t1 = frame_allocate_temp(fr, value_type, field.size, field.alignment);
 
 				instruction in = {0};
 				in.type = INS_LEA;
 				in.as.op.dst = t0;
-				in.as.op.src1 = strukt;
+				in.as.op.src1 = base;
 				array_append(&instructions, in);
 
 				in = (instruction){0};
@@ -530,6 +561,62 @@ argument compile_expression(lexer_file_loc loc, expression expr, frame* fr) {
 				in.as.op.src2 = (argument){.type=argument_literal, .size=4, .alignment=4, .value=field.offset};
 				array_append(&instructions, in);
 
+				// TODO: support bigger sizes
+				in = (instruction){0};
+				in.type = INS_LOAD;
+				in.as.op.dst = t1;
+				in.as.op.src1 = t0;
+				array_append(&instructions, in);
+
+				return t1;
+			} else if (tree.op == operator_index) {
+				if (tree.operands.ptr[0].type != expression_type_identifier) {
+					report_compiler_error(loc, sv("unexpected array access"));
+					return argument_error;
+				}
+
+				symbol* symbl = symbol_lookup(tree.operands.ptr[0].as.identifier);
+				if (symbl == NULL) {
+					report_compiler_error(loc, tconcat(sv("unknown symbol "), tree.operands.ptr[0].as.identifier));
+					return argument_error;
+				}
+
+				if (symbl->type.type != type_array) {
+					report_compiler_error(loc, tconcat(sv("unknown array "), symbl->identifier));
+					return argument_error;
+				}
+
+				argument base = symbol_to_argument(loc, symbl);
+				if (base.type == argument_none) {
+					return argument_error;
+				}
+
+				argument index_arg = compile_expression(loc, tree.operands.ptr[1], fr);
+				if (index_arg.type == argument_none) {
+					return argument_error;
+				}
+
+				size_t elm_size = size_of_type(*symbl->type.as.array.inner);
+				size_t elm_alignment = size_of_type(*symbl->type.as.array.inner);
+				argument t0 = frame_allocate_temp(fr, argument_value_ref, 8, 8);  // TODO: size of pointer
+				argument_value_type value_type = (elm_size<=8)?argument_value_int:argument_value_aggregate;
+				argument t1 = frame_allocate_temp(fr, value_type, elm_size, elm_alignment);
+
+				instruction in = {0};
+				in.type = INS_LEA;
+				in.as.op.dst = t0;
+				in.as.op.src1 = base;
+				array_append(&instructions, in);
+
+				in = (instruction){0};
+				in.type = INS_MADD;
+				in.as.op.dst = t0;
+				in.as.op.src1 = index_arg;
+				in.as.op.src2 =	(argument){.type=argument_literal, .size=4, .alignment=4, .value=elm_size};
+				in.as.op.src3 = t0;
+				array_append(&instructions, in);
+
+				// TODO: support bigger sizes
 				in = (instruction){0};
 				in.type = INS_LOAD;
 				in.as.op.dst = t1;
@@ -544,7 +631,8 @@ argument compile_expression(lexer_file_loc loc, expression expr, frame* fr) {
 				in.as.op.src1 = compile_expression(loc, tree.operands.ptr[0], fr);
 				if (in.as.op.src1.type == argument_none) return argument_error;
 				
-				in.as.op.dst = frame_allocate_temp(fr, in.as.op.src1.size, in.as.op.src1.alignment);
+				argument_value_type value_type = (in.as.op.src1.size<=8)?argument_value_int:argument_value_aggregate;
+				in.as.op.dst = frame_allocate_temp(fr, value_type, in.as.op.src1.size, in.as.op.src1.alignment);
 
 				switch(expr.as.tree.op) {
 				case operator_plus:
@@ -609,7 +697,8 @@ void compile_statement(statement stm, frame* fr) {
 			alignment = alignment_of_type(decl_type);
 		}
 
-		argument dst = frame_allocate(argument_local, fr, decl.identifier, size, alignment);
+		argument_value_type value_type = (size<=8)?argument_value_int:argument_value_aggregate;
+		argument dst = frame_allocate(fr, argument_local, value_type, decl.identifier, size, alignment);
 		symbol_add(symbol_type_local, decl.identifier, decl_type, dst.offset, size, alignment);
 
 		if (decl.value.type != expression_type_none) {
@@ -624,7 +713,7 @@ void compile_statement(statement stm, frame* fr) {
 				return;
 			}
 
-			// TODO: sizeof(word)
+			// TODO: size of pointer
 			if (src.size <= 8) {
 				instruction in = (instruction){0};
 				in.type = INS_STORE;
@@ -632,8 +721,8 @@ void compile_statement(statement stm, frame* fr) {
 				in.as.op.src1 = src;
 				array_append(&instructions, in);
 			} else {
-				argument t0 = frame_allocate_temp(fr, 8, 8); // TODO: size of pointer
-				argument t1 = frame_allocate_temp(fr, 8, 8); // TODO: size of pointer
+				argument t0 = frame_allocate_temp(fr, argument_value_ref, 8, 8); // TODO: size of pointer
+				argument t1 = frame_allocate_temp(fr, argument_value_ref, 8, 8); // TODO: size of pointer
 
 				instruction in = (instruction){0};
 				in.type = INS_LEA;
@@ -658,33 +747,106 @@ void compile_statement(statement stm, frame* fr) {
 	} break;
 	case statement_type_assign: {
 		statement_assign assign = stm.as.assignment;
-		symbol* symbl = symbol_lookup(assign.destination.identifier);
-		if (symbl == NULL) {
-			report_compiler_error(stm.loc, tconcat(sv("unknown identifier "), assign.destination.identifier));
-			return;
-		}
-
-		argument dst = symbol_to_argument(stm.loc, symbl);
-		if (dst.type == argument_none) {
-			return;
-		}
 
 		argument src = compile_expression(stm.loc, assign.value, fr);
 		if (src.type == argument_none) {
 			return;
 		}
 
-		// TODO: typecheck
-		if (src.size != dst.size) {
-			report_compiler_error(stm.loc, sv("size mismatch in assignment"));
+		symbol* symbl = symbol_lookup(assign.destination.identifier);
+		if (symbl == NULL) {
+			report_compiler_error(stm.loc, tconcat(sv("unknown identifier "), assign.destination.identifier));
 			return;
 		}
 
-		instruction in = (instruction){0};
-		in.type = (src.size > 8)?INS_COPY:INS_STORE;
-		in.as.op.dst = dst;
-		in.as.op.src1 = src;
-		array_append(&instructions, in);
+		if (assign.destination.type == destination_type_variable) {
+			argument dst = symbol_to_argument(stm.loc, symbl);
+			if (dst.type == argument_none) {
+				return;
+			}
+
+			// TODO: typecheck
+			if (src.size != dst.size) {
+				report_compiler_error(stm.loc, sv("size mismatch in assignment"));
+				return;
+			}
+
+			// TODO: size of register
+			if (src.size <= 8) {
+				instruction in = (instruction){0};
+				in.type = INS_STORE;
+				in.as.op.dst = dst;
+				in.as.op.src1 = src;
+			} else {
+				argument t0 = frame_allocate_temp(fr, argument_value_ref, 8, 8); // TODO: size of pointer
+				argument t1 = frame_allocate_temp(fr, argument_value_ref, 8, 8); // TODO: size of pointer
+
+				instruction in = (instruction){0};
+				in.type = INS_LEA;
+				in.as.op.dst = t0;
+				in.as.op.src1 = dst;
+				array_append(&instructions, in);
+
+				in = (instruction){0};
+				in.type = INS_LEA;
+				in.as.op.dst = t1;
+				in.as.op.src1 = src;
+				array_append(&instructions, in);
+
+				in = (instruction){0};
+				in.type = INS_COPY;
+				in.as.op.dst = t0;
+				in.as.op.src1 = t1;
+				in.as.op.src2 = (argument){.type=argument_literal, .size=4, .alignment=4, .value=src.size};
+				array_append(&instructions, in);
+			}
+		} else if (assign.destination.type == destination_type_indexed) {
+			if (symbl->type.type != type_array) {
+				report_compiler_error(stm.loc, sv("object must be an array to be indexed"));
+				return;
+			}
+
+			// TODO: typecheck
+			size_t elm_size = size_of_type(*symbl->type.as.array.inner);
+			if (src.size != elm_size) {
+				report_compiler_error(stm.loc, sv("size mismatch in assignment"));
+				return;
+			}
+
+			argument base = symbol_to_argument(stm.loc, symbl);
+			if (base.type == argument_none) {
+				return;
+			}
+
+			argument t0 = frame_allocate_temp(fr, argument_value_ref, 8, 8); // TODO: size of pointer
+
+			instruction in = (instruction){0};
+			in.type = INS_LEA;
+			in.as.op.dst = t0;
+			in.as.op.src1 = base;
+			array_append(&instructions, in);
+
+			argument index_arg = compile_expression(stm.loc, assign.destination.as.indexed.value, fr);
+			if (index_arg.type == argument_none) {
+				return;
+			}
+
+			in = (instruction){0};
+			in.type = INS_MADD;
+			in.as.op.dst = t0;
+			in.as.op.src1 = index_arg;
+			in.as.op.src2 =	(argument){.type=argument_literal, .size=4, .alignment=4, .value=elm_size};
+			in.as.op.src3 = t0;
+			array_append(&instructions, in);
+		
+			// TODO: Support bigger types
+			in = (instruction){0};
+			in.type = INS_STORE;
+			in.as.op.dst = t0;
+			in.as.op.src1 = src;
+			array_append(&instructions, in);
+		} else unreachable;
+
 	} break;
 	case statement_type_return: {
 		argument arg = compile_expression(stm.loc, stm.as.ret.value, fr);
@@ -703,6 +865,7 @@ void compile_statement(statement stm, frame* fr) {
 }
 
 void load_function_params(function fn, frame* fr) {
+	int offset = 0;
 	for (int i=0; i<fn.arguments.len; i++) {
 		binding bind = fn.arguments.ptr[i];
 
@@ -724,11 +887,13 @@ void load_function_params(function fn, frame* fr) {
 			alignment = alignment_of_type(decl_type);
 		}
 
-		argument arg = (argument){.type=argument_param, .name=bind.identifier, .offset=i, .size=size, .alignment=alignment};
+		argument arg = (argument){.type=argument_param, .name=bind.identifier, .offset=offset, .size=size, .alignment=alignment};
+		if (arg.size <= 8) offset++; else offset+=2;
 		
 		instruction in	= {0};
 		in.type = INS_LPARAM;
-		in.as.op.dst = frame_allocate(argument_local, fr, bind.identifier, arg.size, arg.alignment);
+		argument_value_type value_type = (arg.size<=8)?argument_value_int:argument_value_aggregate;
+		in.as.op.dst = frame_allocate(fr, argument_local, value_type, bind.identifier, arg.size, arg.alignment);
 		in.as.op.src1 = arg;
 
 		array_append(&instructions, in);

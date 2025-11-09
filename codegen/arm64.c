@@ -50,13 +50,12 @@ void store_arg(FILE* out, int reg, argument dst, int offset) {
 	case argument_global:
     	fprintf(out, "   adrp x9, _globals@PAGE\n");
 		fprintf(out, "   add x9, x9, _globals@PAGEOFF\n");
-		fprintf(out, "   add %c%d, x9, #%zu\n", reg_size, reg, dst.offset+offset);
+		fprintf(out, "   str %c%d, [x9, #%zu]\n", reg_size, reg, dst.offset+offset);
 		break;
-
+		
 	default: unreachable;
 	}
 }
-
 void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 	fprintf(stderr, "info: generating %.*s\n", string_arg(asm_path));
 	FILE* out = fopen(asm_path.ptr, "w+");
@@ -101,6 +100,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		} break;
 		case INS_LEA: {
 			fprintf(out, "; INS_LEA\n");
+
 			switch(in.as.op.src1.type) {
 			case argument_local:
 				fprintf(out, "   sub x0, x29, #%zu\n", 16+in.as.op.src1.offset);
@@ -121,7 +121,13 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			assert(in.as.op.src2.type == argument_literal);
 
 			int size = in.as.op.src2.value;
-			if (size <= 16) {
+			if (size <= 8) {
+				load_arg(out, 0, in.as.op.src1, 0);
+				load_arg(out, 1, in.as.op.dst, 0);
+
+			    fprintf(out, "   ldr x2, [x0, #0]\n");
+			    fprintf(out, "   str x2, [x1, #0]\n");
+			} else if (size <= 16) {
 				load_arg(out, 0, in.as.op.src1, 0);
 				load_arg(out, 1, in.as.op.dst, 0);
 
@@ -178,13 +184,14 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			fprintf(out, "; INS_CALL\n");
 
 			if (in.as.call.params.len > 8) todo("support more arguments than 8");
-			for (int i=0; i<min(in.as.call.params.len, 8); i++) {
+			int i = 0;
+			while(i<min(in.as.call.params.len, 8)) {
 				argument arg = in.as.call.params.ptr[i];
 				if (arg.size <= 8 ) {
-					load_arg(out, i, arg, 0);
+					load_arg(out, i++, arg, 0);
 				} else if (arg.size <= 16) {
-					load_arg(out, i, arg, 0);
-					load_arg(out, i+1, arg, 8);
+					load_arg(out, i++, arg, 0);
+					load_arg(out, i++, arg, 8);
 				} else {
 					todo("support bigger struct types");
 				}
@@ -196,16 +203,24 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		} break;
 		case INS_LOAD: {
 			fprintf(out, "; INS_LOAD\n");
+			char reg_size = in.as.op.src1.size <= 4 ? 'w' : 'x';
 
 			load_arg(out, 0, in.as.op.src1, 0);
-			fprintf(out, "   ldr x0, [x0]\n");
+			fprintf(out, "   ldr %c0, [x0]\n", reg_size);
 			store_arg(out, 0, in.as.op.dst, 0);
 		} break;
 		case INS_STORE: {
 			fprintf(out, "; INS_STORE\n");
+			char reg_size = in.as.op.src1.size <= 4 ? 'w' : 'x';
 
 			load_arg(out, 0, in.as.op.src1, 0);
-			store_arg(out, 0, in.as.op.dst, 0);
+			
+			if (in.as.op.dst.value_type == argument_value_ref) {
+				load_arg(out, 1, in.as.op.dst, 0);
+				fprintf(out, "   str %c0, [x1]\n", reg_size);
+			} else {
+				store_arg(out, 0, in.as.op.dst, 0);
+			}
 		} break;
 		case INS_ADD: {
 			fprintf(out, "; INS_ADD\n");
@@ -231,6 +246,16 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			fprintf(out, "   mul x0, x0, x1\n");
 			store_arg(out, 0, in.as.op.dst, 0);
 		} break;
+		case INS_MADD: {
+			fprintf(out, "; INS_MADD\n");
+
+			load_arg(out, 0, in.as.op.src1, 0);
+			load_arg(out, 1, in.as.op.src2, 0);
+			load_arg(out, 2, in.as.op.src3, 0);
+			fprintf(out, "   madd x0, x0, x1, x2\n");
+			store_arg(out, 0, in.as.op.dst, 0);
+		} break;
+
 		case INS_DIV: {
 			fprintf(out, "; INS_DIV\n");
 
