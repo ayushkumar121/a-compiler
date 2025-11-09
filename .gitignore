@@ -1,0 +1,6 @@
+*.dSYM
+*.o
+tinyc
+tests
+foo
+.DS_STORE

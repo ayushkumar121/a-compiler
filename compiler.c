@@ -7,16 +7,10 @@ typedef enum {
 	argument_string,
 } argument_type;
 
-typedef enum {
-	argument_value_int,
-	argument_value_ptr,
-	argument_value_struct,
-} argument_value_type;
-
 typedef struct {
 	argument_type type;
-	argument_value_type value_type;
 	string name;
+	// bool signed;
 	size_t offset;
 	size_t size;
 	size_t alignment;
@@ -34,6 +28,8 @@ typedef struct {
 typedef enum {
 	INS_LEA,
 	INS_LSTR,
+	INS_LPARAM,
+	INS_LOAD,
     INS_STORE,
     INS_ADD,
     INS_SUB,
@@ -74,7 +70,7 @@ typedef struct {
 	string label;
 	union {
 		struct {argument dst, src1, src2;} op;
-		struct {argument_list params; frame* frame;} func;
+		struct {frame* frame;} func;
 		struct {argument dst; argument_list params;} call;
 	} as;
 } instruction;
@@ -93,7 +89,6 @@ typedef struct {
 typedef struct symbol symbol;
 
 typedef enum {
-	symbol_type_param,
 	symbol_type_local,
 	symbol_type_global,
 	symbol_type_function,
@@ -116,14 +111,6 @@ typedef struct {
 	symbol* last;
 } symbol_table;
 
-string value_type_to_string(argument_value_type value_type) {
-	switch(value_type) {
-	case argument_value_int: return sv("int");
-	case argument_value_ptr: return sv("ptr");
-	case argument_value_struct: return sv("struct");
-	}
-}
-
 string argument_to_string(argument arg) {
 	switch(arg.type) {
 	case argument_none: 
@@ -131,17 +118,17 @@ string argument_to_string(argument arg) {
 	case argument_string: 
 		return tsprintf("string(index=%zu)", arg.offset);
 	case argument_literal: 
-		return tsprintf("literal(value_type=%.*s size=%zu alignment=%zu value=%zu)", 
-			string_arg(value_type_to_string(arg.value_type)), arg.size, arg.alignment, arg.value);
+		return tsprintf("literal(size=%zu alignment=%zu value=%zu)", 
+			arg.size, arg.alignment, arg.value);
 	case argument_param: 
-		return tsprintf("param(name=%.*s value_type=%.*s offset=%zu size=%zu alignment=%zu)", 
-			string_arg(arg.name), string_arg(value_type_to_string(arg.value_type)), arg.offset, arg.size, arg.alignment); break;
+		return tsprintf("param(name=%.*s index=%zu size=%zu alignment=%zu)", 
+			string_arg(arg.name), arg.offset, arg.size, arg.alignment); break;
 	case argument_local: 
-		return tsprintf("local(name=%.*s value_type=%.*s offset=%zu size=%zu alignment=%zu)", 
-			string_arg(arg.name), string_arg(value_type_to_string(arg.value_type)), arg.offset, arg.size, arg.alignment); break;
+		return tsprintf("local(name=%.*s offset=%zu size=%zu alignment=%zu)", 
+			string_arg(arg.name), arg.offset, arg.size, arg.alignment); break;
 	case argument_global:
-		return tsprintf("global(name=%.*s value_type=%.*s offset=%zu size=%zu alignment=%zu)", 
-			string_arg(arg.name), string_arg(value_type_to_string(arg.value_type)), arg.offset, arg.size, arg.alignment); break;
+		return tsprintf("global(name=%.*s offset=%zu size=%zu alignment=%zu)", 
+			string_arg(arg.name), arg.offset, arg.size, arg.alignment); break;
 	}
 }
 
@@ -162,6 +149,8 @@ void print_instruction(instruction in) {
 	switch(in.type) {
     case INS_LEA: printf("INS_LEA"); break;
     case INS_LSTR: printf("INS_LSTR"); break;
+    case INS_LPARAM: printf("INS_LPARAM"); break;
+    case INS_LOAD: printf("INS_LOAD"); break;
     case INS_STORE: printf("INS_STORE"); break;
     case INS_ADD: printf("INS_ADD"); break;
     case INS_SUB: printf("INS_SUB"); break;
@@ -181,12 +170,8 @@ void print_instruction(instruction in) {
 
 	printf(" {\n");
 	if (in.type == INS_FUNC_START) {
-		printf("\tlabel=%.*s\n\tframe=%.*s\n\tparams={\n", 
+		printf("\tlabel=%.*s\n\tframe=%.*s\n", 
 			string_arg(in.label), string_arg(frame_to_string(in.as.func.frame)));
-		for (int i=0; i<in.as.func.params.len; i++) {
-			printf("\t\t%.*s\n", string_arg(argument_to_string(in.as.func.params.ptr[i]))); 
-		}
-		printf("\t}\n");
 	} else if (in.type == INS_FUNC_END) {
 		/* Print nothing */
 	}else if (in.type == INS_CALL) {
@@ -272,9 +257,7 @@ argument frame_allocate(argument_type arg_type, frame* fr, string identifier, si
 	fr->size += align(size, alignment);
 	frame_local local = {.identifier=identifier, .offset=offset, .size=size, .alignment=alignment};
 	array_append(&fr->locals, local);
-	argument_value_type arg_value_type = (size <= 8)? 
-		argument_value_int: argument_value_struct;
-	return (argument){.type=arg_type, .value_type=arg_value_type, .name=identifier, .offset=offset, .size=size, .alignment=alignment};
+	return (argument){.type=arg_type, .name=identifier, .offset=offset, .size=size, .alignment=alignment};
 }
 
 argument frame_allocate_temp(frame* fr, size_t size, size_t alignment) {
@@ -305,7 +288,7 @@ size_t size_of_type(type type) {
 	case type_wrapped: {
 		switch(type.as.wrapped.type) {
 		case wrapped_type_constant: return size_of_type(*type.as.wrapped.inner);
-		case wrapped_type_pointer: return 8;
+		case wrapped_type_pointer: return 8; // TODO: pointer size
 		default: todo("implement size_of_type for the type");
 		}
 	}
@@ -333,13 +316,7 @@ size_t size_of_type(type type) {
 size_t alignment_of_type(type type) {
 	switch(type.type) {
 	case type_primitive: return size_of_type(type);
-	case type_wrapped: {
-		switch(type.as.wrapped.type) {
-		case wrapped_type_pointer: return 8;
-		case wrapped_type_constant: return size_of_type(*type.as.wrapped.inner);
-		default: todo("implement alignment_of_type for the type");
-		}
-	}
+	case type_wrapped:return size_of_type(type);
 	case type_struct: {
 		assert(type.as.structure.complete);
 		size_t max_align = 1;
@@ -412,14 +389,28 @@ type type_of_expression(expression expr) {
 	todo("implement type_of_expression");
 }
 
+argument symbol_to_argument(lexer_file_loc loc, symbol* symbl) {
+	argument_type arg_type;
+	if (symbl->symbol_type == symbol_type_local)
+		arg_type = argument_local;
+	else if (symbl->symbol_type == symbol_type_global) 
+		arg_type = argument_global;
+	else {
+		report_compiler_error(loc, tconcat(symbl->identifier, sv(" is not an lvalue")));
+		return argument_error;
+	}
+
+	return (argument){.type=arg_type, .name=symbl->identifier, .offset=symbl->offset, .size=symbl->size, .alignment=symbl->alignment};
+}
+
 argument compile_expression(lexer_file_loc loc, expression expr, frame* fr) {
 	switch(expr.type) {
 	case expression_type_literal: {
 		switch(expr.as.literal.type) {
 		case expression_literal_integer: 
-			return (argument){.type=argument_literal, .value_type=argument_value_int, .size=4, .alignment=4, .value=expr.as.literal.as.integer};
+			return (argument){.type=argument_literal, .size=4, .alignment=4, .value=expr.as.literal.as.integer};
 		case expression_literal_char:
-			return (argument){.type=argument_literal, .value_type=argument_value_int, .size=4, .alignment=4, .value=expr.as.literal.as.character};
+			return (argument){.type=argument_literal, .size=4, .alignment=4, .value=expr.as.literal.as.character};
 		case expression_literal_string: {
 			instruction in = {0};
 			in.type = INS_LSTR;
@@ -438,17 +429,10 @@ argument compile_expression(lexer_file_loc loc, expression expr, frame* fr) {
 			return argument_error;
 		}
 
-		if (symbl->symbol_type == symbol_type_local)
-			return (argument){.type=argument_local, .name=expr.as.identifier, .offset=symbl->offset, .size=symbl->size, .alignment=symbl->alignment};
-		else if (symbl->symbol_type == symbol_type_global) 
-			return (argument){.type=argument_global, .name=expr.as.identifier, .offset=symbl->offset, .size=symbl->size, .alignment=symbl->alignment};
-		else {
-			report_compiler_error(loc, tconcat(symbl->identifier, sv(" is not an lvalue")));
-			return argument_error;
-		}
+		return symbol_to_argument(loc, symbl);
 	} break;
 	case expression_type_func_call: {
-		expression_func_call func_call = expr.as.func_call;
+		func_call func_call = expr.as.func_call;
 
 		symbol* symbl = symbol_lookup(func_call.identifier);
 		if (symbl == NULL) {
@@ -513,6 +497,11 @@ argument compile_expression(lexer_file_loc loc, expression expr, frame* fr) {
 					return argument_error;
 				}
 
+				if (symbl->type.type != type_struct) {
+					report_compiler_error(loc, tconcat(sv("unknown struct "), symbl->identifier));
+					return argument_error;
+				}
+
 				string field_name = tree.operands.ptr[1].as.identifier;
 				struct_field field = field_of_struct(symbl->type.as.structure, field_name);
 				if (field.type.type == type_none) {
@@ -520,22 +509,34 @@ argument compile_expression(lexer_file_loc loc, expression expr, frame* fr) {
 					return argument_error;
 				}
 
-				string identifier = strconcat(symbl->identifier, sv("."));
-				identifier = strconcat(identifier, field_name);
-
-				argument_type arg_type;
-				if (symbl->symbol_type == symbol_type_local)
-					arg_type = argument_local;
-				else if (symbl->symbol_type == symbol_type_global) 
-					arg_type = argument_global;
-				else if (symbl->symbol_type == symbol_type_param) 
-					arg_type = argument_param;
-				else {
-					report_compiler_error(loc, tconcat(symbl->identifier, sv(" is not an lvalue")));
+				argument strukt = symbol_to_argument(loc, symbl);
+				if (strukt.type == argument_none) {
 					return argument_error;
 				}
 
-				return (argument){.type=arg_type, .name=identifier, .offset=symbl->offset+field.offset, .size=field.size, .alignment=field.alignment};
+				argument t0 = frame_allocate_temp(fr, 8, 8);  // TODO: size of pointer
+				argument t1 = frame_allocate_temp(fr, field.size, field.alignment);
+
+				instruction in = {0};
+				in.type = INS_LEA;
+				in.as.op.dst = t0;
+				in.as.op.src1 = strukt;
+				array_append(&instructions, in);
+
+				in = (instruction){0};
+				in.type = INS_ADD;
+				in.as.op.dst = t0;
+				in.as.op.src1 = t0;
+				in.as.op.src2 = (argument){.type=argument_literal, .size=4, .alignment=4, .value=field.offset};
+				array_append(&instructions, in);
+
+				in = (instruction){0};
+				in.type = INS_LOAD;
+				in.as.op.dst = t1;
+				in.as.op.src1 = t0;
+				array_append(&instructions, in);
+
+				return t1;
 			} else {
 				// TODO: typecheck
 				instruction in = {0};
@@ -631,8 +632,8 @@ void compile_statement(statement stm, frame* fr) {
 				in.as.op.src1 = src;
 				array_append(&instructions, in);
 			} else {
-				argument t0 = frame_allocate_temp(fr, 8, 8);
-				argument t1 = frame_allocate_temp(fr, 8, 8);
+				argument t0 = frame_allocate_temp(fr, 8, 8); // TODO: size of pointer
+				argument t1 = frame_allocate_temp(fr, 8, 8); // TODO: size of pointer
 
 				instruction in = (instruction){0};
 				in.type = INS_LEA;
@@ -650,7 +651,7 @@ void compile_statement(statement stm, frame* fr) {
 				in.type = INS_COPY;
 				in.as.op.dst = t0;
 				in.as.op.src1 = t1;
-				in.as.op.src2 = (argument){.type=argument_literal, .value_type=argument_value_int, .value=src.size};
+				in.as.op.src2 = (argument){.type=argument_literal, .size=4, .alignment=4, .value=src.size};
 				array_append(&instructions, in);
 			}
 		}
@@ -663,19 +664,11 @@ void compile_statement(statement stm, frame* fr) {
 			return;
 		}
 
-		argument_type arg_type;
-		if (symbl->symbol_type == symbol_type_local)
-			arg_type = argument_local;
-		else if (symbl->symbol_type == symbol_type_global) 
-			arg_type = argument_global;
-		else if (symbl->symbol_type == symbol_type_param) 
-			arg_type = argument_param;
-		else {
-			report_compiler_error(stm.loc, tconcat(assign.destination.identifier, sv("is not an lvalue")));
+		argument dst = symbol_to_argument(stm.loc, symbl);
+		if (dst.type == argument_none) {
 			return;
 		}
 
-		argument dst = (argument){.type=arg_type, .name=assign.destination.identifier, .offset=symbl->offset, .size=symbl->size, .alignment=symbl->alignment};
 		argument src = compile_expression(stm.loc, assign.value, fr);
 		if (src.type == argument_none) {
 			return;
@@ -709,26 +702,18 @@ void compile_statement(statement stm, frame* fr) {
 	}
 }
 
-argument_list compile_function_params(function fn) {
-	argument_list params = {0};
-
-	size_t offset = 0;
+void load_function_params(function fn, frame* fr) {
 	for (int i=0; i<fn.arguments.len; i++) {
 		binding bind = fn.arguments.ptr[i];
-		if (symbol_lookup(bind.identifier) != NULL) {
-			report_compiler_error(fn.loc, tconcat(sv("redefintion of symbol "), bind.identifier));
-			return params;
-		}
 
-		struct type decl_type;
 		size_t size;
 		size_t alignment;
-
+		struct type decl_type;
 		if (bind.type.type == type_struct) {
 			symbol* struct_symbol = symbol_lookup(bind.type.as.structure.identifier);
 			if (struct_symbol == NULL) {
 				report_compiler_error(fn.loc, tconcat(sv("unknown identifier "), bind.type.as.structure.identifier));
-				return params;
+				return;
 			}
 			decl_type = struct_symbol->type;
 			size = struct_symbol->size;
@@ -739,18 +724,17 @@ argument_list compile_function_params(function fn) {
 			alignment = alignment_of_type(decl_type);
 		}
 
-		argument_value_type arg_value_type = (size <= 8)? 
-			argument_value_int: argument_value_struct;
+		argument arg = (argument){.type=argument_param, .name=bind.identifier, .offset=i, .size=size, .alignment=alignment};
 		
-		offset = align(offset, size);
-		offset += size;
-		symbol_add(symbol_type_param, bind.identifier, decl_type, offset, size, alignment);
+		instruction in	= {0};
+		in.type = INS_LPARAM;
+		in.as.op.dst = frame_allocate(argument_local, fr, bind.identifier, arg.size, arg.alignment);
+		in.as.op.src1 = arg;
 
-		argument arg = (argument){.type=argument_param, .value_type=arg_value_type, .name=bind.identifier, .offset=offset, .size=size, .alignment=alignment};	
-		array_append(&params, arg);
+		array_append(&instructions, in);
+
+		symbol_add(symbol_type_local, bind.identifier, decl_type, in.as.op.dst.offset, size, alignment);
 	}
-
-	return params;
 }
 
 void compile_function(function fn) {
@@ -761,13 +745,13 @@ void compile_function(function fn) {
 	}
 	symbol_add(symbol_type_function, fn.identifier, type_of_function(fn), 0, 8, 1);
 
-	symbol_table saved = symbols;
-	argument_list params = compile_function_params(fn);
-
 	frame* fr = calloc(1, sizeof(frame));
+	symbol_table saved = symbols;
 
-	instruction in = (instruction){.type = INS_FUNC_START, .label=fn.identifier, .as = {.func = {.params=params, .frame=fr}}};
+	instruction in = (instruction){.type = INS_FUNC_START, .label=fn.identifier, .as = {.func = {.frame=fr}}};
 	array_append(&instructions, in);
+	
+	load_function_params(fn, fr);
 
 	for (int i=0; i<fn.body.len; i++) {
 		compile_statement(fn.body.ptr[i], fr);

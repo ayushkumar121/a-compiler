@@ -149,7 +149,7 @@ typedef struct expression_list {
 typedef struct {
 	string identifier;
 	expression_list expressions;
-} expression_func_call;
+} func_call;
 
 typedef struct {
 	operator op;
@@ -162,7 +162,7 @@ typedef struct expression {
 		expression_literal literal;
 		string identifier;
 		expression_tree tree;
-		expression_func_call func_call;
+		func_call func_call;
 	} as;
 } expression;
 
@@ -223,11 +223,6 @@ typedef struct {
 	expression value;
 } statement_assign;
 
-typedef struct {
-	string identifier;
-	expression_list expressions;
-} statement_func_call;
-
 typedef struct scope {
 	statement_list statements;
 } statement_scope;
@@ -251,7 +246,7 @@ typedef struct statement {
 	union {
 		declaration declaration;
 		statement_assign assignment;
-		statement_func_call func_call;
+		func_call func_call;
 		statement_scope scope;
 		statement_return ret;
 		statement_if iff;
