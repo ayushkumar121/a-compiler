@@ -8,12 +8,25 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <execinfo.h>
 
 #define max(a,b) (a>b?a:b)
 #define min(a,b) (a<b?a:b)
 
-#define unreachable assert(0);
-#define todo(message) assert(0 && "TODO:" message);
+#define ASSERT(condition) \
+    do { \
+        if (!(condition)) { \
+            fprintf(stderr, "%s:%d Assertion failed: %s\n", \
+                    __FILE__, __LINE__, #condition); \
+            void* callstack[128]; \
+            int frames = backtrace(callstack, 128); \
+            backtrace_symbols_fd(callstack, frames, 0); \
+            abort(); \
+        } \
+    } while (0)
+
+#define unreachable ASSERT(false && "unreachable");
+#define todo(message) ASSERT(false && "TODO:" message);
 
 typedef struct {
   int len;

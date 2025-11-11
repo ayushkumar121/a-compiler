@@ -155,7 +155,7 @@ string argument_to_string(argument arg) {
 }
 
 string frame_to_string(frame* frame) {
-	assert(frame != NULL);
+	ASSERT(frame != NULL);
 	string str = tsprintf("{\n\t\tsize=%zu\n\t\tlocals={\n", frame->size);
 	
 	for (int i = 0; i < frame->locals.len; i++) {
@@ -317,7 +317,12 @@ size_t size_of_type(type type) {
 		}
 	}
 	case type_struct: {
-		assert(type.as.structure.complete); // TODO: report_error("unknown structure")
+		if (!type.as.structure.complete) {
+			symbol* symbl = symbol_lookup(type.as.structure.identifier);
+			if (symbl == NULL || symbl->type.type != type_struct) unreachable;
+			type = symbl->type;
+		}
+
 		size_t max_align = 1;
 		size_t offset = 0;
 
@@ -343,7 +348,12 @@ size_t alignment_of_type(type type) {
 	case type_primitive: return size_of_type(type);
 	case type_wrapped:return size_of_type(type);
 	case type_struct: {
-		assert(type.as.structure.complete);
+		if (!type.as.structure.complete) {
+			symbol* symbl = symbol_lookup(type.as.structure.identifier);
+			if (symbl == NULL || symbl->type.type != type_struct) unreachable;
+			type = symbl->type;
+		}
+
 		size_t max_align = 1;
 
 		for (int i=0; i<type.as.structure.field_types.len; i++) {
@@ -561,12 +571,28 @@ argument compile_expression(lexer_file_loc loc, expression expr, frame* fr) {
 				in.as.op.src2 = (argument){.type=argument_literal, .size=4, .alignment=4, .value=field.offset};
 				array_append(&instructions, in);
 
-				// TODO: support bigger sizes
-				in = (instruction){0};
-				in.type = INS_LOAD;
-				in.as.op.dst = t1;
-				in.as.op.src1 = t0;
-				array_append(&instructions, in);
+				if (field.size <= 8) {
+					in = (instruction){0};
+					in.type = INS_LOAD;
+					in.as.op.dst = t1;
+					in.as.op.src1 = t0;
+					array_append(&instructions, in);
+				} else {				
+					argument t2 = frame_allocate_temp(fr, argument_value_ref, 8, 8);  // TODO: size of pointer
+
+					instruction in = {0};
+					in.type = INS_LEA;
+					in.as.op.dst = t2;
+					in.as.op.src1 = t1;
+					array_append(&instructions, in);
+
+					in = (instruction){0};
+					in.type = INS_COPY;
+					in.as.op.dst = t2;
+					in.as.op.src1 = t0;
+					in.as.op.src2 = (argument){.type=argument_literal, .size=4, .alignment=4, .value=field.size};
+					array_append(&instructions, in);
+				}
 
 				return t1;
 			} else if (tree.op == operator_index) {
@@ -617,11 +643,28 @@ argument compile_expression(lexer_file_loc loc, expression expr, frame* fr) {
 				array_append(&instructions, in);
 
 				// TODO: support bigger sizes
-				in = (instruction){0};
-				in.type = INS_LOAD;
-				in.as.op.dst = t1;
-				in.as.op.src1 = t0;
-				array_append(&instructions, in);
+				if (elm_size <= 8) {
+					in = (instruction){0};
+					in.type = INS_LOAD;
+					in.as.op.dst = t1;
+					in.as.op.src1 = t0;
+					array_append(&instructions, in);
+				} else {
+					argument t2 = frame_allocate_temp(fr, argument_value_ref, 8, 8);  // TODO: size of pointer
+
+					instruction in = {0};
+					in.type = INS_LEA;
+					in.as.op.dst = t2;
+					in.as.op.src1 = t1;
+					array_append(&instructions, in);
+
+					in = (instruction){0};
+					in.type = INS_COPY;
+					in.as.op.dst = t2;
+					in.as.op.src1 = t0;
+					in.as.op.src2 = (argument){.type=argument_literal, .size=4, .alignment=4, .value=elm_size};
+					array_append(&instructions, in);
+				}
 
 				return t1;
 			} else {
@@ -713,7 +756,6 @@ void compile_statement(statement stm, frame* fr) {
 				return;
 			}
 
-			// TODO: size of pointer
 			if (src.size <= 8) {
 				instruction in = (instruction){0};
 				in.type = INS_STORE;
@@ -721,8 +763,8 @@ void compile_statement(statement stm, frame* fr) {
 				in.as.op.src1 = src;
 				array_append(&instructions, in);
 			} else {
-				argument t0 = frame_allocate_temp(fr, argument_value_ref, 8, 8); // TODO: size of pointer
-				argument t1 = frame_allocate_temp(fr, argument_value_ref, 8, 8); // TODO: size of pointer
+				argument t0 = frame_allocate_temp(fr, argument_value_ref, 8, 8);
+				argument t1 = frame_allocate_temp(fr, argument_value_ref, 8, 8);
 
 				instruction in = (instruction){0};
 				in.type = INS_LEA;
@@ -771,15 +813,14 @@ void compile_statement(statement stm, frame* fr) {
 				return;
 			}
 
-			// TODO: size of register
 			if (src.size <= 8) {
 				instruction in = (instruction){0};
 				in.type = INS_STORE;
 				in.as.op.dst = dst;
 				in.as.op.src1 = src;
 			} else {
-				argument t0 = frame_allocate_temp(fr, argument_value_ref, 8, 8); // TODO: size of pointer
-				argument t1 = frame_allocate_temp(fr, argument_value_ref, 8, 8); // TODO: size of pointer
+				argument t0 = frame_allocate_temp(fr, argument_value_ref, 8, 8);
+				argument t1 = frame_allocate_temp(fr, argument_value_ref, 8, 8);
 
 				instruction in = (instruction){0};
 				in.type = INS_LEA;
@@ -806,8 +847,19 @@ void compile_statement(statement stm, frame* fr) {
 				return;
 			}
 
+			size_t elm_size;
+			if (symbl->type.as.array.inner->type == type_struct) {
+				symbol* struct_symbol = symbol_lookup(symbl->type.as.array.inner->as.structure.identifier);
+				if (struct_symbol == NULL) {
+					report_compiler_error(stm.loc, tconcat(sv("unknown identifier "), symbl->type.as.array.inner->as.structure.identifier));
+					return;
+				}
+				elm_size = struct_symbol->size;
+			} else {
+				elm_size = size_of_type(*symbl->type.as.array.inner);
+			}
+
 			// TODO: typecheck
-			size_t elm_size = size_of_type(*symbl->type.as.array.inner);
 			if (src.size != elm_size) {
 				report_compiler_error(stm.loc, sv("size mismatch in assignment"));
 				return;
@@ -818,7 +870,7 @@ void compile_statement(statement stm, frame* fr) {
 				return;
 			}
 
-			argument t0 = frame_allocate_temp(fr, argument_value_ref, 8, 8); // TODO: size of pointer
+			argument t0 = frame_allocate_temp(fr, argument_value_ref, 8, 8);
 
 			instruction in = (instruction){0};
 			in.type = INS_LEA;
@@ -839,12 +891,69 @@ void compile_statement(statement stm, frame* fr) {
 			in.as.op.src3 = t0;
 			array_append(&instructions, in);
 		
-			// TODO: Support bigger types
-			in = (instruction){0};
-			in.type = INS_STORE;
+			if (src.size <= 8) {
+				in = (instruction){0};
+				in.type = INS_STORE;
+				in.as.op.dst = t0;
+				in.as.op.src1 = src;
+				array_append(&instructions, in);
+			} else {
+				ASSERT(src.type != argument_literal);
+				argument t1 = frame_allocate_temp(fr, argument_value_ref, 8, 8);
+				
+				instruction in = (instruction){0};
+				in.type = INS_LEA;
+				in.as.op.dst = t1;
+				in.as.op.src1 = src;
+				array_append(&instructions, in);
+
+				in = (instruction){0};
+				in.type = INS_COPY;
+				in.as.op.dst = t0;
+				in.as.op.src1 = t1;
+				in.as.op.src2 = (argument){.type=argument_literal, .size=4, .alignment=4, .value=src.size};
+				array_append(&instructions, in);
+			}
+		} else if (assign.destination.type == destination_type_field) {
+			if (symbl->type.type != type_struct) {
+				report_compiler_error(stm.loc, sv("object must be an struct to be access field"));
+				return;
+			}
+
+			string field_name = assign.destination.as.field.name;
+			struct_field field = field_of_struct(symbl->type.as.structure, field_name);
+			if (field.type.type == type_none) {
+				report_compiler_error(stm.loc, tconcat(sv("unknown field "), field_name));
+				return;
+			}
+
+			// TODO: typecheck
+			if (src.size != field.size) {
+				report_compiler_error(stm.loc, sv("size mismatch in assignment"));
+				return;
+			}
+
+			argument base = symbol_to_argument(stm.loc, symbl);
+			if (base.type == argument_none) {
+				return;
+			}
+
+			argument t0 = frame_allocate_temp(fr, argument_value_ref, 8, 8);
+
+			instruction in = (instruction){0};
+			in.type = INS_LEA;
 			in.as.op.dst = t0;
-			in.as.op.src1 = src;
+			in.as.op.src1 = base;
 			array_append(&instructions, in);
+
+			in = (instruction){0};
+			in.type = INS_ADD;
+			in.as.op.dst = t0;
+			in.as.op.src1 = t0;
+			in.as.op.src2 =	(argument){.type=argument_literal, .size=4, .alignment=4, .value=field.offset};
+			array_append(&instructions, in);
+
+
 		} else unreachable;
 
 	} break;
@@ -935,7 +1044,7 @@ void compile_structure(structure strukt) {
 		return;
 	}
 
-	type strukt_type = type_of_struct(strukt);
+	type strukt_type = type_of_struct(strukt);	
 	size_t size = size_of_type(strukt_type);
 	size_t alignment = alignment_of_type(strukt_type);
 

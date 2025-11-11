@@ -22,7 +22,7 @@ void load_arg(FILE* out, int reg, argument src, int offset) {
 
 	switch(src.type) {
 	case argument_literal:
-		assert(src.size <= 8);
+		ASSERT(src.size <= 8);
 		load_immediate(out, reg, src.size, src.value);
 		break;
 
@@ -118,7 +118,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		} break;
 		case INS_COPY: {
 			fprintf(out, "; INS_COPY\n");
-			assert(in.as.op.src2.type == argument_literal);
+			ASSERT(in.as.op.src2.type == argument_literal);
 
 			int size = in.as.op.src2.value;
 			if (size <= 8) {
@@ -151,7 +151,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		case INS_LSTR: {
 			fprintf(out, "; INS_LSTR\n");
 
-			assert(in.as.op.src1.type == argument_string);
+			ASSERT(in.as.op.src1.type == argument_string);
 			string str = ir.strings.ptr[in.as.op.src1.offset];
 
 			load_immediate(out, 0, 8, str.len);
@@ -165,7 +165,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		case INS_LPARAM: {
 			fprintf(out, "; INS_LPARAM\n");
 
-			assert(in.as.op.src1.type == argument_param);
+			ASSERT(in.as.op.src1.type == argument_param);
 			int index = in.as.op.src1.offset;
 			if (index <= 8) {
 				if (in.as.op.src1.size <= 8 ) {
@@ -203,6 +203,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		} break;
 		case INS_LOAD: {
 			fprintf(out, "; INS_LOAD\n");
+			ASSERT(in.as.op.src1.value_type == argument_value_ref);
 			char reg_size = in.as.op.src1.size <= 4 ? 'w' : 'x';
 
 			load_arg(out, 0, in.as.op.src1, 0);
