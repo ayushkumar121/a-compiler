@@ -234,6 +234,24 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 
 				fprintf(out, "   str %c0, [x1]\n", ins.as.op.src1.size <= 4 ? 'w' : 'x');
 				break;
+				
+			case op_copy:
+			    fprintf(out, "; op_copy\n");
+			    ASSERT(ins.as.op.src2.type == argument_type_literal);
+			    
+			    int size = ins.as.op.src2.as.value;
+			    
+			    load_addr(out, 0, ins.as.op.src1);  // src address -> x0
+			    load_addr(out, 1, ins.as.op.dst);   // dst address -> x1
+			    load_immediate(out, 2, 8, size);     // size -> x2
+			    fprintf(out, "   mov x3, #0\n");     // offset = 0
+			    fprintf(out, ".Lcopy_%d:\n", i);     // Loop label
+			    fprintf(out, "   ldrb w4, [x0, x3]\n");  // Load byte from src
+			    fprintf(out, "   strb w4, [x1, x3]\n");  // Store byte to dst
+			    fprintf(out, "   add x3, x3, #1\n");     // offset++
+			    fprintf(out, "   cmp x3, x2\n");         // Compare offset with size
+			    fprintf(out, "   b.lt .Lcopy_%d\n", i);  // Loop if offset < size
+			    break;
 
 			default:{
 				printf("unimplemented op %d\n", ins.as.op.type);
@@ -242,39 +260,6 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			}
 		} break;
 
-		// case INS_COPY: {
-		// 	fprintf(out, "; INS_COPY\n");
-		// 	ASSERT(in.as.op.src2.type == argument_literal);
-
-		// 	int size = in.as.op.src2.value;
-		// 	if (size <= 8) {
-		// 		load_arg(out, 0, in.as.op.src1, 0);
-		// 		load_arg(out, 1, in.as.op.dst, 0);
-
-		// 	    fprintf(out, "   ldr x2, [x0, #0]\n");
-		// 	    fprintf(out, "   str x2, [x1, #0]\n");
-		// 	} else if (size <= 16) {
-		// 		load_arg(out, 0, in.as.op.src1, 0);
-		// 		load_arg(out, 1, in.as.op.dst, 0);
-
-		// 	    fprintf(out, "   ldr x2, [x0, #0]\n");
-		// 	    fprintf(out, "   ldr x3, [x0, #8]\n"); 
-		// 	    fprintf(out, "   str x2, [x1, #0]\n");
-		// 	    fprintf(out, "   str x3, [x1, #8]\n");
-		// 	} else {
-		// 		load_arg(out, 0, in.as.op.src1, 0); // src = x0
-		// 		load_arg(out, 1, in.as.op.dst, 0); // dst = x1
-		// 		load_immediate(out, 2, 8, size); // bytes remaining
-		// 	    fprintf(out, "   mov x3, #0\n"); // offset = 0
-		// 	    fprintf(out, "1:\n");
-		// 	    fprintf(out, "   ldrb w6, [x0, x3]\n"); // load byte from src
-		// 	    fprintf(out, "   strb w6, [x1, x3]\n"); // store byte to dst
-		// 	    fprintf(out, "   add x3, x3, #1\n"); // offset++
-		// 	    fprintf(out, "   cmp x3, x2\n"); // check if done
-		// 	    fprintf(out, "   b.lt 1b\n");  // loop if offset < size
-		// 	}
-		// } break;
-		
 		default: {
 			printf("unimplemented ins %d\n", ins.type);
 			unreachable;
