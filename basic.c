@@ -46,9 +46,9 @@ typedef struct {
 } strings;
 
 #define sv(cstr) (string){sizeof(cstr)-1, cstr}
-#define string_fmt "%.*s"
-#define string_arg(s) (int)(s).len, (s).ptr
-#define string_empty (string){0};
+#define sfmt "%.*s"
+#define sarg(s) (int)(s).len, (s).ptr
+#define snil (string){0};
 
 bool string_eq(string s1, string s2) {
   return s1.len == s2.len && memcmp(s1.ptr, s2.ptr, s1.len) == 0;
@@ -79,7 +79,7 @@ string_pair string_split_first(string s, char delim) {
   string_pair pair = {0};
   if (index == -1) {
     pair.first = s;
-    pair.second = string_empty;
+    pair.second = snil;
   } else {
     pair.first = (string){index, s.ptr};
     pair.second = (string){s.len-index, s.ptr+index};
@@ -99,7 +99,7 @@ string_pair string_split_last(string s, char delim) {
   string_pair pair = {0};
   if (index == -1) {
     pair.first = s;
-    pair.second = string_empty;
+    pair.second = snil;
   } else {
     pair.first = (string){index, s.ptr};
     pair.second = (string){s.len-index, s.ptr+index};
@@ -108,11 +108,11 @@ string_pair string_split_last(string s, char delim) {
 }
 
 void print(string s) {
-  printf("%.*s", string_arg(s));
+  printf(sfmt, sarg(s));
 }
 
 void println(string s) {
-  printf("%.*s\n", string_arg(s));
+  printf(sfmt"\n", sarg(s));
 }
 
 #define TEMP_BUFFER_CAP (1024*1024)
@@ -294,7 +294,7 @@ string args_next(Args* args) {
 		size_t n = strlen(cstr);
 		return (string){n, cstr};
 	}
-	return string_empty;
+	return snil;
 }
 
 size_t file_size(const char *path) {
@@ -312,20 +312,20 @@ bool file_exists(const char *path) {
 string file_read_to_string(const char* path) {
 	size_t size = file_size(path);
   if (size == 0) {
-    return string_empty;
+    return snil;
   }
 
   char* buffer = malloc(size);
   FILE *file = fopen(path, "r");
   if (file == NULL) {
   	fprintf(stderr, "failed to open file %s: %s", path, strerror(errno));
-    return string_empty;
+    return snil;
   }
 
   size_t n = fread(buffer, 1, size, file);
   if (n != size) {
   	fprintf(stderr, "failed to read file %s: %s", path, strerror(errno));
-    return string_empty;
+    return snil;
   }
   fclose(file);
 
@@ -480,6 +480,60 @@ void report_error_old(string message) {
 }
 
 void cmd(string command) {
-  fprintf(stderr, "CMD: %.*s\n", string_arg(command));
+  fprintf(stderr, "CMD: %.*s\n", sarg(command));
   system(string_to_cstr(command));
+}
+
+typedef enum {
+  system_unknown,
+  system_linux,
+  system_windows,
+  system_macos,
+} operating_system;
+
+typedef enum {
+  arch_unknown,
+  arch_x86,
+  arch_x64,
+  arch_arm64,
+} architecture;
+
+typedef struct {
+  operating_system system;
+  architecture arch;
+} machine;
+
+machine detect_host_machine(void) {
+  machine m = {system_unknown, arch_unknown};
+
+    #if defined(__APPLE__)
+        m.system = system_macos;
+    #elif defined(_WIN32) || defined(_WIN64)
+        m.system = system_windows;
+    #elif defined(__linux__)
+        m.system = system_linux;
+    #else
+        m.system = system_unknown;
+    #endif
+
+    #if defined(__aarch64__) || defined(_M_ARM64)
+        m.arch = arch_arm64;
+    #elif defined(__x86_64__) || defined(_M_X64)
+        m.arch = arch_x64;
+    #elif defined(__i386__) || defined(_M_IX86)
+        m.arch = arch_x86;
+    #else
+        m.arch = arch_unknown;
+    #endif
+
+  return m;
+}
+
+int size_of_ptr(machine m) {
+  switch(m.arch) {
+  case arch_x64: 
+  case arch_arm64: return 8;
+  case arch_x86: return 4;
+  default: ASSERT(false && "unsupported arch");
+  }
 }

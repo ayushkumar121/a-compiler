@@ -4,6 +4,7 @@ int error_count;
 #include "lexer.c"
 #include "parser.c"
 #include "compiler.c"
+#include "simulator.c"
 #include "codegen.c"
 
 int main(int argc, char** argv) {
@@ -22,6 +23,7 @@ int main(int argc, char** argv) {
 		fprintf(stderr, "error: %d errors occured during compilation\n", error_count);
 		exit(1);
 	}
+	simulate(ir);
 	codegen(ir, file_path, detect_host_machine());
 
 	return 0;

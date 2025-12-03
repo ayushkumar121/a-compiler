@@ -46,6 +46,7 @@ typedef enum {
 	wrapped_type_pointer,
 	wrapped_type_optional,
 	wrapped_type_result,
+	// TODO: slice?
 } wrapped_type_type;
 
 typedef struct {
@@ -65,11 +66,13 @@ typedef struct {
 typedef struct {
 	bool complete;
 	string identifier;
-	strings field_names;
-	type_list field_types;
+	int field_count;
+	string* field_names;
+	type* field_types;
 } struct_type;
 
 typedef struct {
+	string identifier;
 	type* return_type;
 	type_list arguments;
 } function_type;
@@ -86,7 +89,7 @@ typedef struct type {
 	} as;
 } type;
 
-#define type_error (type){.type=type_none}
+#define type_error (struct type){.type=type_none}
 
 // end types
 
@@ -188,7 +191,7 @@ typedef enum {
 	statement_type_decl,
 	statement_type_assign,
 	statement_type_func_call,
-	statement_type_scope,
+	statement_type_list,
 	statement_type_return,
 	statement_type_if,
 	statement_type_while,
@@ -196,21 +199,20 @@ typedef enum {
 } statement_type;
 
 typedef enum {
-	destination_type_variable,
-	destination_type_indexed,
-	destination_type_ref,
-	destination_type_field,
-} destination_type;
+	lvalue_type_variable,
+	lvalue_type_indexed,
+	lvalue_type_indirect,
+	lvalue_type_field,
+} lvalue_type;
 
 typedef struct {
-	destination_type type;
+	lvalue_type type;
 	string identifier;
 	union {
-		struct {expression value;} indexed;
-		struct {string name;} field;
-		struct {} var;
+		expression index;
+		string field;
 	} as;
-} destination;
+} lvalue;
 
 typedef struct statement_list {
 	int len;
@@ -219,13 +221,9 @@ typedef struct statement_list {
 } statement_list;
 
 typedef struct {
-	destination destination;
+	lvalue lvalue;
 	expression value;
 } statement_assign;
-
-typedef struct scope {
-	statement_list statements;
-} statement_scope;
 
 typedef struct {
 	expression value;
@@ -247,7 +245,7 @@ typedef struct statement {
 		declaration declaration;
 		statement_assign assignment;
 		func_call func_call;
-		statement_scope scope;
+		statement_list list;
 		statement_return ret;
 		statement_if iff;
 		statement_while whil;
@@ -399,16 +397,16 @@ string type_to_string(type typ) {
 	case type_none: return sv("");
 	case type_primitive: return primitive_to_string(typ.as.primitive);
 	case type_wrapped: return tconcat(wrapped_to_string(typ.as.wrapped.type), type_to_string(*typ.as.wrapped.inner));
-	case type_slice: return tsprintf("[]%.*s", string_arg(type_to_string(*typ.as.slice.inner)));
-	case type_array: return tsprintf("[%d]%.*s",typ.as.array.size, string_arg(type_to_string(*typ.as.array.inner)));
+	case type_slice: return tsprintf("[]%.*s", sarg(type_to_string(*typ.as.slice.inner)));
+	case type_array: return tsprintf("[%d]%.*s",typ.as.array.size, sarg(type_to_string(*typ.as.array.inner)));
 	case type_struct: {
 		string s = tconcat(typ.as.structure.identifier, sv("{"));
 		if (typ.as.structure.complete) {
-			for (int i=0; i<typ.as.structure.field_names.len; i++) {
-				s = tconcat(s, typ.as.structure.field_names.ptr[i]);
+			for (int i=0; i<typ.as.structure.field_count; i++) {
+				s = tconcat(s, typ.as.structure.field_names[i]);
 				s = tconcat(s, sv(":"));
-				s = tconcat(s, type_to_string(typ.as.structure.field_types.ptr[i]));
-				if (i < typ.as.structure.field_names.len-1) {
+				s = tconcat(s, type_to_string(typ.as.structure.field_types[i]));
+				if (i < typ.as.structure.field_count-1) {
 					s = tconcat(s, sv(", "));
 				}
 			}
@@ -444,7 +442,7 @@ string operator_to_string(operator op) {
 	case operator_ampersand: return sv("&");
 	case operator_question: return sv("?");
 	case operator_exclaimation: return sv("!");
-	case operator_index: return sv("[");
+	case operator_index: return sv("[]");
 	}
 }
 
@@ -485,14 +483,24 @@ string expression_to_string(expression expr) {
 
 // type helpers
 
+type type_of_primitive(primitive_type p) {
+	type typ = {0};
+	typ.type = type_primitive;
+	typ.as.primitive = p;
+	return typ;
+}
+
 type type_of_struct(structure s) {
 	type typ = {0};
 	typ.type = type_struct;
 	typ.as.structure.identifier = s.identifier;
 	typ.as.structure.complete = true;
-	for (int i=0; i<s.parameters.len; i++) {
-		array_append(&typ.as.structure.field_names, s.parameters.ptr[i].identifier);
-		array_append(&typ.as.structure.field_types, s.parameters.ptr[i].type);
+	typ.as.structure.field_count = s.parameters.len;
+	typ.as.structure.field_names = malloc(typ.as.structure.field_count*sizeof(string));
+	typ.as.structure.field_types = malloc(typ.as.structure.field_count*sizeof(type));
+	for (int i=0; i<typ.as.structure.field_count; i++) {
+		typ.as.structure.field_names[i] = s.parameters.ptr[i].identifier;
+		typ.as.structure.field_types[i] = s.parameters.ptr[i].type;
 	}
 	return typ;
 }
@@ -501,17 +509,11 @@ type type_of_function(function fn) {
 	type typ = {0};
 	typ.type = type_function;
 	typ.as.function.return_type = malloc(sizeof(type));
+	typ.as.function.identifier = fn.identifier;
 	*(typ.as.function.return_type) = fn.return_type;
 	for (int i=0; i<fn.arguments.len; i++) {
 		array_append(&typ.as.function.arguments, fn.arguments.ptr[i].type);
 	}
-	return typ;
-}
-
-type type_of_primitive(primitive_type primitive) {
-	type typ = {0};
-	typ.type = type_primitive;
-	typ.as.primitive = primitive;
 	return typ;
 }
 
@@ -909,15 +911,7 @@ declaration parse_declaration(lexer* lex) {
 		expression expr = parse_expression(lex);
 		if (expr.type == expression_type_none) return declaration_error;
 		decl.value = expr;
-
-		t = lexer_next_token(lex);
-		if (t.type != token_semicolon) {
-			report_parser_error(lex, tconcat(sv("expected ; but got "), t.value));
- 			synchronise(lex, synchronise_token_statement);
- 			return declaration_error;
-		}
 	} else if (t.type == token_semicolon) {
-		lexer_next_token(lex);
 		decl.value.type = expression_type_none;
 	} else {
 		report_parser_error(lex, tconcat(sv("expected end of declaration but got "), t.value));
@@ -937,11 +931,16 @@ statement parse_statement(lexer* lex) {
 	if (t.type == token_keyword && t.keyword == keyword_return) {
 		lexer_next_token(lex);
 		s.type = statement_type_return;
-		expression expr = parse_expression(lex);
-		if (expr.type == expression_type_none) {
-			return statement_error;
+
+		if (lexer_peek_token(lex).type == token_semicolon) {
+			s.as.ret.value = expression_error;
+		} else {
+			expression expr = parse_expression(lex);
+			if (expr.type == expression_type_none) {
+				return statement_error;
+			}
+			s.as.ret.value = expr;
 		}
-		s.as.ret.value = expr;
 	} else if (t.type == token_keyword && t.keyword == keyword_if) {
 		lexer_next_token(lex);
 		s.type = statement_type_if;
@@ -1007,8 +1006,8 @@ statement parse_statement(lexer* lex) {
 		if (t.type == token_equal) {
 			lexer_next_token(lex);
 			s.type = statement_type_assign;
-			s.as.assignment.destination.type = destination_type_variable;
-			s.as.assignment.destination.identifier = identifier;
+			s.as.assignment.lvalue.type = lvalue_type_variable;
+			s.as.assignment.lvalue.identifier = identifier;
 			expression expr = parse_expression(lex);
 			if (expr.type == expression_type_none) {
 				return statement_error;
@@ -1017,13 +1016,13 @@ statement parse_statement(lexer* lex) {
 		} else if (t.type == token_left_bracket) {
 			lexer_next_token(lex);
 			s.type = statement_type_assign;
-			s.as.assignment.destination.type = destination_type_indexed;
-			s.as.assignment.destination.identifier = identifier;
+			s.as.assignment.lvalue.type = lvalue_type_indexed;
+			s.as.assignment.lvalue.identifier = identifier;
 			expression expr = parse_expression(lex);
 			if (expr.type == expression_type_none) {
 				return statement_error;
 			}
-			s.as.assignment.destination.as.indexed.value = expr;
+			s.as.assignment.lvalue.as.index = expr;
 			t = lexer_next_token(lex);
 			if (t.type != token_right_bracket) {
 				report_parser_error(lex, tconcat(sv("expected ] got "), t.value));
@@ -1044,8 +1043,8 @@ statement parse_statement(lexer* lex) {
 		} else if (t.type == token_star) {
 			lexer_next_token(lex);
 			s.type = statement_type_assign;
-			s.as.assignment.destination.type = destination_type_ref;
-			s.as.assignment.destination.identifier = identifier;
+			s.as.assignment.lvalue.type = lvalue_type_indirect;
+			s.as.assignment.lvalue.identifier = identifier;
 			t = lexer_next_token(lex);
 			if (t.type != token_equal) {
 				report_parser_error(lex, tconcat(sv("expected = got "), t.value));
@@ -1060,15 +1059,15 @@ statement parse_statement(lexer* lex) {
 		} else if (t.type == token_dot) {
 			lexer_next_token(lex);
 			s.type = statement_type_assign;
-			s.as.assignment.destination.type = destination_type_field;
-			s.as.assignment.destination.identifier = identifier;
+			s.as.assignment.lvalue.type = lvalue_type_field;
+			s.as.assignment.lvalue.identifier = identifier;
 			t = lexer_next_token(lex);
 			if (t.type != token_identifier) {
 				report_parser_error(lex, tconcat(sv("expected field name got "), t.value));
 				synchronise(lex, synchronise_token_statement);
 				return statement_error;
 			}
-			s.as.assignment.destination.as.field.name = t.value;
+			s.as.assignment.lvalue.as.field = t.value;
 
 			t = lexer_next_token(lex);
 			if (t.type != token_equal) {
@@ -1110,12 +1109,12 @@ statement parse_statement(lexer* lex) {
 		}
 	} else if (t.type == token_left_curly) {
 		lexer_next_token(lex);
-		s.type = statement_type_scope;
+		s.type = statement_type_list;
 
 		while(token_not_empty_or_equals(lex, token_right_curly)) {
 			statement st = parse_statement(lex);
 			if (st.type != statement_type_none) {
-				array_append(&(s.as.scope.statements), st);
+				array_append(&(s.as.list), st);
 			}
 		}
 		lexer_next_token(lex);
@@ -1125,8 +1124,13 @@ statement parse_statement(lexer* lex) {
 		return statement_error;
 	}
 
-	// consuming semicolon
 	if (lexer_peek_token(lex).type == token_semicolon) lexer_next_token(lex);
+	else {
+		printf(sfmt"\n", sarg(lexer_current_value(lex)));
+		report_parser_error(lex, sv("expected semicolon"));
+		synchronise(lex, synchronise_token_statement);
+		return statement_error;
+	}
 
 	return s;
 }
@@ -1250,7 +1254,7 @@ program parse_program(lexer* lex) {
 			declaration decl = parse_declaration(lex);
 			if (!decl.error) array_append(&prg.globals, decl);
 		} else {
-			report_parser_error(lex, tsprintf("encountered unknown token `%.*s` at top level", string_arg(t.value)));
+			report_parser_error(lex, tsprintf("encountered unknown token `%.*s` at top level", sarg(t.value)));
 			synchronise(lex, synchronise_token_func);
 		}
 		t = lexer_next_token(lex);

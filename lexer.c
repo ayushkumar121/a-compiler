@@ -163,9 +163,9 @@ keyword lexer_match_keyword(string s) {
 
 token_type lexer_match_symbols(char ch) {
 	switch (ch) {
-  	case '(': return token_left_paren;
+  case '(': return token_left_paren;
 	case ')': return token_right_paren;	
-  	case '{': return token_left_curly;
+  case '{': return token_left_curly;
 	case '}': return token_right_curly;
 	case '[': return token_left_bracket;
 	case ']': return token_right_bracket;
@@ -383,14 +383,14 @@ int64_t lexer_value_to_integer(string lex_value) {
 
 void repor_error_(lexer_file_loc loc, string message, const char* file, int line) {
 	fprintf(stderr, "%.*s:%d:%d error: %.*s see compiler:%s:%d\n", 
-		string_arg(loc.file), loc.line, loc.col, string_arg(message), file, line);
+		sarg(loc.file), loc.line, loc.col, sarg(message), file, line);
 
 	int line_count = lexer_source_line_count(loc.source);
 	for (int i = max(loc.line-2, 1); i<=min(loc.line+2, line_count); i++) {
 		string source_line = lexer_source_line(loc.source, i);
 		if (i == loc.line) fprintf(stderr, "->");
 		else fprintf(stderr, "  ");
-		fprintf(stderr, "%5d|%.*s\n", i, string_arg(source_line));
+		fprintf(stderr, "%5d|%.*s\n", i, sarg(source_line));
 	}
 
 	error_count++;
