@@ -186,7 +186,6 @@ token_type lexer_match_symbols(char ch) {
  	return 0;
 }
 
-
 #define lexer_from_string(source) lexer_from_string_(source, sv(__FILE__))
 
 lexer lexer_from_string_(string source, string file_path) {
@@ -210,8 +209,17 @@ token lexer_peek_token(lexer* lex) {
 	}
 	if (lex->start >= lex->source.len) {
 	  return token_eof;
-	}  
+	}
 	lex->end = lex->start;
+
+	// Skip comments
+	if (lex->start < lex->source.len-1 && lex->source.ptr[lex->start] == '/' &&  lex->source.ptr[lex->start+1] == '/') {
+		while (lex->start < lex->source.len && lex->source.ptr[lex->start] != '\n') {
+	  	lex->start++;
+		}
+		lex->start++; // skipping new line
+		lex->end = lex->start;
+	}
 
 	// Matching Symbols
 	token_type symbol = lexer_match_symbols(lex->source.ptr[lex->end]);

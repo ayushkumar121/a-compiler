@@ -1,5 +1,6 @@
 *.dSYM
 *.o
+*.asm
 tinyc
 tests
 foo

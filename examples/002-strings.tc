@@ -1,0 +1,5 @@
+// strings are structure with both len + ptr
+func main() {
+	var str string = "hello world";
+	return str[0] + str[1];
+}

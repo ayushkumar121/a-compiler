@@ -101,9 +101,9 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 	fprintf(out, "   movz x16, #0x1\n");
 	fprintf(out, "   movk x16, #0x200, lsl #16\n");
 	fprintf(out, "   svc #0\n");
+	fprintf(out, "   b .\n\n"); // noreturn
 
 	size_t frame_size;
-	string func_name;
 
 	for (int i=0; i<ir.instructions.len; i++) {
 		instruction ins = ir.instructions.ptr[i];
@@ -118,13 +118,11 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			fprintf(out, "   stp x29, x30, [sp, #-16]!\n");
 			fprintf(out, "   mov x29, sp\n");
 			frame_size = align(ins.as.frame->size, 16);
-			func_name = ins.as.frame->identifier;
 			fprintf(out, "   sub sp, sp, #%zu\n", frame_size);
 			break;
 
 		case ins_func_end:
 			fprintf(out, "; ins_func_end\n");
-			fprintf(out, ".Lreturn_%.*s:\n", sarg(func_name));
 			fprintf(out, "   add sp, sp, #%zu\n", frame_size);
 			fprintf(out, "   ldp x29, x30, [sp], #16\n");
 			fprintf(out, "   ret\n");
@@ -149,7 +147,6 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		case ins_ret:
 			fprintf(out, "; ins_ret\n");
 			load_arg(out, 0, ins.as.ret);
-			fprintf(out, "   b .Lreturn_"sfmt"\n", sarg(func_name));
 			break;
 
 		case ins_binop: {
@@ -234,7 +231,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 
 				fprintf(out, "   str %c0, [x1]\n", ins.as.op.src1.size <= 4 ? 'w' : 'x');
 				break;
-				
+
 			case op_copy:
 			    fprintf(out, "; op_copy\n");
 			    ASSERT(ins.as.op.src2.type == argument_type_literal);
@@ -245,12 +242,12 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			    load_addr(out, 1, ins.as.op.dst);   // dst address -> x1
 			    load_immediate(out, 2, 8, size);     // size -> x2
 			    fprintf(out, "   mov x3, #0\n");     // offset = 0
-			    fprintf(out, ".Lcopy_%d:\n", i);     // Loop label
+			    fprintf(out, "1:\n");                // Loop label
 			    fprintf(out, "   ldrb w4, [x0, x3]\n");  // Load byte from src
 			    fprintf(out, "   strb w4, [x1, x3]\n");  // Store byte to dst
 			    fprintf(out, "   add x3, x3, #1\n");     // offset++
 			    fprintf(out, "   cmp x3, x2\n");         // Compare offset with size
-			    fprintf(out, "   b.lt .Lcopy_%d\n", i);  // Loop if offset < size
+			    fprintf(out, "   b.lt 1b\n");         // Loop if offset < size
 			    break;
 
 			default:{
