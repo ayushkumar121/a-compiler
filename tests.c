@@ -55,6 +55,9 @@ void test_compiler_001(void) {
 	ASSERT(error_count == 0);
 	codegen(ir, file_path, detect_host_machine());
 	ASSERT(system("./example/001") == 40);
+	int status = system("./example/001");
+    ASSERT(WIFEXITED(status));
+    ASSERT(WEXITSTATUS(status) == 40);
 }
 
 void test_compiler_002(void) {
@@ -64,7 +67,9 @@ void test_compiler_002(void) {
 	intermediate_representation ir = compile(prg);
 	ASSERT(error_count == 0);
 	codegen(ir, file_path, detect_host_machine());
-	ASSERT(system("./example/002-strings") == 205);
+	int status = system("./example/002-strings");
+    ASSERT(WIFEXITED(status));
+    ASSERT(WEXITSTATUS(status) == 205);
 }
 
 int main(void) {

@@ -307,7 +307,6 @@ argument argument_from_symbol(symbol* symbl) {
 }
 
 argument argument_field(argument base, int offset, int size) {
-	ASSERT(base.type == argument_type_local || base.type == argument_type_global);
 	if (base.type == argument_type_local) base.as.offset -= offset;
 	else if (base.type == argument_type_global) base.as.offset += offset;
 	else unreachable;
