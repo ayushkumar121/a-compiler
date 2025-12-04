@@ -27,7 +27,7 @@ void load_arg(FILE* out, int reg, argument src) {
 		break;
 
 	case argument_type_local:
-		fprintf(out, "   ldr %c%d, [x29, #-%d]\n", reg_size, reg, src.as.offset + 16);
+		fprintf(out, "   ldr %c%d, [x29, #-%d]\n", reg_size, reg, src.as.offset);
 		break;
 
 	case argument_type_global:
@@ -49,18 +49,18 @@ void load_param(FILE* out, int index, argument dst) {
 	char reg_size = dst.size <= 4? 'w':'x';
 	ASSERT(dst.type == argument_type_local);
 	if (index < 8) {
-        fprintf(out, "    str %c%d, [x29, #-%d]\n", reg_size, index, dst.as.offset + 16);
+        fprintf(out, "    str %c%d, [x29, #-%d]\n", reg_size, index, dst.as.offset);
     } else {
         int slot = index - 8;
         fprintf(out, "    ldr %c0, [x29, #%d]\n",reg_size,  16 + slot*8);
-        fprintf(out, "    str %c0, [x29, #-%d]\n",reg_size, dst.as.offset + 16);
+        fprintf(out, "    str %c0, [x29, #-%d]\n",reg_size, dst.as.offset);
     }
 }
 
 void load_addr(FILE* out, int reg, argument src) {
 	switch(src.type) {
 	case argument_type_local:
-		fprintf(out, "   sub x%d, x29, #%d\n", reg, src.as.offset + 16);
+		fprintf(out, "   sub x%d, x29, #%d\n", reg, src.as.offset);
 		break;
 
 	case argument_type_global:
@@ -77,7 +77,7 @@ void store_arg(FILE* out, int reg, argument dst) {
 	char reg_size = dst.size <= 4? 'w':'x';
 	switch(dst.type) {
 	case argument_type_local:
-		fprintf(out, "   str %c%d, [x29, #-%d]\n", reg_size, reg, dst.as.offset + 16);
+		fprintf(out, "   str %c%d, [x29, #-%d]\n", reg_size, reg, dst.as.offset);
 		break;
 
 	case argument_type_global:
@@ -137,7 +137,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		            int slot = i - 8;
 		            int offset = 16 + slot * 8;
 		            load_arg(out, 0, ins.as.fcall.args[i]);
-		            fprintf(out, "   str x0, [x29, #-%d]\n", offset+16);
+		            fprintf(out, "   str x0, [x29, #-%d]\n", offset);
 		        }
 			}
 			fprintf(out, "   bl _"sfmt"\n", sarg(ins.as.fcall.identifier));
@@ -211,7 +211,13 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 				ASSERT(ins.as.op.src2.type != argument_type_none);
 
 				load_arg(out, 0, ins.as.op.src1);
-				fprintf(out, "   ldr %c0, [x0]\n", ins.as.op.dst.size <= 4 ? 'w' : 'x');
+			    if (ins.as.op.dst.size == 1) {
+			        fprintf(out, "   ldrb w0, [x0]\n");
+			    } else if (ins.as.op.dst.size == 2) {
+			        fprintf(out, "   ldrh w0, [x0]\n");
+			    } else {
+			        fprintf(out, "   ldr %c0, [x0]\n", ins.as.op.dst.size <= 4 ? 'w' : 'x');
+			    }
 				store_arg(out, 0, ins.as.op.dst);
 				break;
 
