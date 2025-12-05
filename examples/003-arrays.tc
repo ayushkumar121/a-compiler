@@ -1,0 +1,6 @@
+func main() int {
+	var arr [2]int;
+	arr[0] = 33;
+	arr[1] = 77;
+	return arr[0] + arr[1];
+}

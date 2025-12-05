@@ -48,35 +48,30 @@ void test_post_expr_parsing(void) {
 }
 
 void test_compiler_001(void) {
-	string file_path = sv("example/001.tc");
-	lexer lex = lexer_from_file(file_path);
-	program prg = parse_program(&lex);
-	intermediate_representation ir = compile(prg);
-	ASSERT(error_count == 0);
-	codegen(ir, file_path, detect_host_machine());
-	ASSERT(system("./example/001") == 40);
-	int status = system("./example/001");
+	int status = system("./tinyc ./examples/001.tc && ./examples/001");
     ASSERT(WIFEXITED(status));
     ASSERT(WEXITSTATUS(status) == 40);
 }
 
 void test_compiler_002(void) {
-	string file_path = sv("example/002-strings.tc");
-	lexer lex = lexer_from_file(file_path);
-	program prg = parse_program(&lex);
-	intermediate_representation ir = compile(prg);
-	ASSERT(error_count == 0);
-	codegen(ir, file_path, detect_host_machine());
-	int status = system("./example/002-strings");
+	int status = system("./tinyc ./examples/002-strings.tc && ./examples/002-strings");
     ASSERT(WIFEXITED(status));
     ASSERT(WEXITSTATUS(status) == 205);
 }
 
+void test_compiler_003(void) {
+	int status = system("./tinyc ./examples/003-arrays.tc && ./examples/003-arrays");
+    ASSERT(WIFEXITED(status));
+    ASSERT(WEXITSTATUS(status) == 110);
+}
 int main(void) {
 	test_type_parsing();
 	test_infix_expr_parsing();
 	test_prefix_expr_parsing();
 	test_post_expr_parsing();
+	test_compiler_001();
+	test_compiler_002();
+	test_compiler_003();
 
 	fprintf(stderr, "info: all test passed\n");
 }

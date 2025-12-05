@@ -1,3 +1,10 @@
+int vreg_mapping[R_Count] = {
+	[R0] = 4, //x4
+	[R1] = 5, //x5
+	[R2] = 6, //x6
+	[R3] = 7, //x7
+};
+
 void load_immediate(FILE* out, int reg, size_t size, size_t value) {
 	char reg_size = size <= 4 ? 'w' : 'x';
 
@@ -27,8 +34,8 @@ void load_arg(FILE* out, int reg, argument src) {
 		break;
 
 	case argument_type_vreg:
-		if ((virtual_register)reg != src.as.vreg) {
-    		fprintf(out, "   mov %c%d, %c%d\n", reg_size, reg, reg_size, src.as.vreg);
+		if (reg != vreg_mapping[src.as.vreg]) {
+    		fprintf(out, "   mov %c%d, %c%d\n", reg_size, reg, reg_size, vreg_mapping[src.as.vreg]);
     	}
 		break;
 
@@ -84,8 +91,8 @@ void store_arg(FILE* out, int reg, argument dst) {
 	char reg_size = dst.size <= 4? 'w':'x';
 	switch(dst.type) {
 	case argument_type_vreg:
-		if ((virtual_register)reg != dst.as.vreg) {
-    		fprintf(out, "   mov %c%d, %c%d\n", reg_size, dst.as.vreg, reg_size, reg);
+		if (reg != vreg_mapping[dst.as.vreg]) {
+    		fprintf(out, "   mov %c%d, %c%d\n", reg_size, vreg_mapping[dst.as.vreg], reg_size, reg);
     	}
 		break;
 

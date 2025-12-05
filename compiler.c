@@ -31,8 +31,9 @@ typedef enum {
 typedef enum {
 	R0,
 	R1,
+	R2,
 	R3,
-	R4,
+	R_Count
 } virtual_register;
 
 typedef enum {
@@ -103,12 +104,14 @@ typedef struct symbol {
 } symbol;
 
 #define PTR_SIZE 8
+#define WORD_SIZE 4
 
 symbol* symbol_top = NULL;
 symbol* symbol_saved = NULL;
 strings string_literals = {0};
 instruction_list instructions = {0};
 lexer_file_loc loc;
+string current_func_name;
 
 void symbol_add(symbol_type symbol_type, string identifier, type type, int offset) {
 	symbol* new_symbol = malloc(sizeof(symbol));
@@ -126,7 +129,8 @@ void symbol_dump() {
 	symbol* iter = symbol_top;
 	printf("----SYMBOLS----\n");
 	while(iter != NULL) {
-		printf(sfmt":"sfmt"\n", sarg(iter->identifier), sarg(type_to_string(*iter->type)));
+		char* symbol_type = (iter->symbol_type == symbol_type_local)? "local":"global";
+		printf(sfmt" : "sfmt" @ %s %d\n", sarg(iter->identifier), sarg(type_to_string(*iter->type)), symbol_type, iter->offset);
 		iter = iter->next;
 	}
 	printf("----SYMBOLS----\n");
@@ -285,7 +289,7 @@ inline static argument argument_string_literal(string str) {
 }
 
 inline static argument argument_literal(int value) {
-	return (argument){.type=argument_type_literal, .size=PTR_SIZE, .as={.value=value}};
+	return (argument){.type=argument_type_literal, .size=WORD_SIZE, .as={.value=value}};
 }
 
 inline static argument argument_local(int offset, int size) {
@@ -375,6 +379,11 @@ type type_of_expression(expression expr) {
 		ASSERT(symbl && symbl->type);
 		return *symbl->type;
 	}
+	case expression_type_func_call: {
+		symbol* symbl = symbol_lookup(expr.as.func_call.identifier, symbol_type_function);
+		ASSERT(symbl && symbl->type);
+		return *symbl->type->as.function.return_type;
+	}
 	case expression_type_tree: {
 		if (expr.as.tree.operands.len == 1) {
 			switch(expr.as.tree.op) {
@@ -393,8 +402,14 @@ type type_of_expression(expression expr) {
 			case operator_star:
 			case operator_slash:
 				return type_of_expression(expr.as.tree.operands.ptr[0]);
-			case operator_index:
-				return type_of_expression(expr.as.tree.operands.ptr[0]);
+			case operator_index: {
+				type base_type = type_of_expression(expr.as.tree.operands.ptr[0]);
+				if (base_type.type == type_array) {
+					return *base_type.as.array.inner;
+				} else if (base_type.type == type_primitive && base_type.as.primitive == primitive_string) {
+					return type_of_primitive(primitive_byte);
+				} else unreachable;
+			}
 			default: unreachable;
 			}
 		} else unreachable;
@@ -494,13 +509,7 @@ argument compile_binop(frame* frame, expression_tree expr_tree) {
 			return argument_none();
 		}
 
-		argument base = argument_from_symbol(symbl);
-		argument dst = argument_allocate(frame, f.size);
-		argument t0 = argument_register(R0);
-		add_instruction_op(op_addrof, t0, base);
-		add_instruction_op2(op_add, t0, t0, argument_literal(f.offset));
-		add_instruction_op2(op_load_indirect, dst, t0, argument_literal(f.size));
-		return dst;
+		return argument_field(argument_from_symbol(symbl), f.offset, f.size);
 	} else {
 		op_type op;
 		switch(expr_tree.op) {
@@ -624,18 +633,18 @@ void compile_statement(frame* frame, statement stm) {
 			return;
 		}
 
-		argument dst; // = argument_allocate(frame, size_of_type(&decl_type));
+		argument dst;
 		if (decl.value.type != expression_type_none) {
-			argument src = compile_expression(frame, decl.value);
-			if (src.type == argument_type_none) return;
-
 			type value_type = type_of_expression(decl.value);
 			if (!type_eq(&decl_type, &value_type)) {
 				report_compiler_error(loc, type_mismatch_error(decl_type, value_type));
 				return;
 			}
 
+			argument src = compile_expression(frame, decl.value);
+			if (src.type == argument_type_none) return;
 			if (src.type == argument_type_local) {
+				// Incase src is already allocated on local we steal its location
 				dst = src;
 			} else {
 				dst = argument_allocate(frame, size_of_type(&decl_type));
@@ -644,6 +653,8 @@ void compile_statement(frame* frame, statement stm) {
 				else 
 					add_instruction_op2(op_copy, dst, src, argument_literal(dst.size));
 			}
+		} else {
+			dst = argument_allocate(frame, size_of_type(&decl_type));
 		}
 		symbol_add(symbol_type_local, decl.identifier, decl_type, dst.as.offset);
 	} break;
@@ -683,6 +694,13 @@ void compile_statement(frame* frame, statement stm) {
 				return;
 			}
 
+			type* elemtype = decl_type->as.array.inner;
+			type value_type = type_of_expression(assignment.value);
+			if (!type_eq(elemtype, &value_type)) {
+				report_compiler_error(loc, type_mismatch_error(*elemtype, value_type));
+				return;
+			}
+
 			int elemsize = size_of_type(decl_type->as.array.inner);
 			argument base = argument_from_symbol(symbl);
 			argument index = compile_expression(frame, assignment.lvalue.as.index);
@@ -693,7 +711,14 @@ void compile_statement(frame* frame, statement stm) {
 			argument t0 = argument_register(R0);
 			add_instruction_op(op_addrof, t0, base);
 			add_instruction_op2(op_madd, t0, index, argument_literal(elemsize));
-			add_instruction_op2(op_store_indirect, t0, value, argument_literal(elemsize));
+
+			if (elemsize <= PTR_SIZE)
+				add_instruction_op2(op_store_indirect, t0, value, argument_literal(elemsize));
+			else {
+				argument t1 = argument_register(R1);
+				add_instruction_op(op_addrof, t1, value);
+				add_instruction_op2(op_copy, t0, t1, argument_literal(elemsize));
+			}
 		} break;
 
 		case lvalue_type_field: {
@@ -701,20 +726,27 @@ void compile_statement(frame* frame, statement stm) {
 				report_compiler_error(loc, tconcat(sv("cannot access field of "), assignment.lvalue.identifier));
 				return;
 			}
+
 			field f = struct_field(decl_type->as.structure, assignment.lvalue.as.field);
 			if (f.offset == -1) {
 				report_compiler_error(loc, tconcat(sv("unknown field "), assignment.lvalue.as.field));
 				return;
 			}
 
-			argument base = argument_from_symbol(symbl);
-			argument value = compile_expression(frame, assignment.value);
-			if (value.type == argument_type_none) return;
+			type value_type = type_of_expression(assignment.value);
+			if (!type_eq(&f.type, &value_type)) {
+				report_compiler_error(loc, type_mismatch_error(f.type, value_type));
+				return;
+			}
 
-			argument t0 = argument_register(R0);
-			add_instruction_op(op_addrof, t0, base);
-			add_instruction_op2(op_add, t0, t0, argument_literal(f.offset));
-			add_instruction_op2(op_store_indirect, t0, value, argument_literal(f.size));
+			argument dst = argument_field(argument_from_symbol(symbl), f.offset, f.size);
+			argument src = compile_expression(frame, assignment.value);
+			if (src.type == argument_type_none) return;
+
+			if (dst.size <= PTR_SIZE)
+				add_instruction_op(op_store, dst, src);
+			else 
+				add_instruction_op2(op_copy, dst, src, argument_literal(dst.size));
 		} break;
 
 		default: unreachable;
@@ -725,6 +757,16 @@ void compile_statement(frame* frame, statement stm) {
 		argument value;
 
 		if (stm.as.ret.value.type != expression_type_none) {
+			symbol* symbl = symbol_lookup(current_func_name, symbol_type_function);
+			ASSERT(symbl != NULL);
+
+			type* return_type = symbl->type->as.function.return_type;
+			type value_type = type_of_expression(stm.as.ret.value);
+			if (!type_eq(return_type, &value_type)) {
+				report_compiler_error(loc, type_mismatch_error(*return_type, value_type));
+				return;
+			}
+
 			value = compile_expression(frame, stm.as.ret.value);
 			if (value.type == argument_type_none) return;
 		} else {
@@ -751,6 +793,7 @@ void compile_function(function func) {
 	fprintf(stderr, "info: compiling func "sfmt"\n", sarg(func.identifier));
 
 	loc = func.loc;
+	current_func_name = func.identifier;
 	if (symbol_lookup(func.identifier, symbol_type_function)) {
 		report_compiler_error(loc, tconcat(sv("redefinition of function "), func.identifier));
 		return;
