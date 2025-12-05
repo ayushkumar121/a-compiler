@@ -29,7 +29,15 @@ typedef enum {
 } op_type;
 
 typedef enum {
+	R0,
+	R1,
+	R3,
+	R4,
+} virtual_register;
+
+typedef enum {
 	argument_type_none,
+	argument_type_vreg,
 	argument_type_local,
 	argument_type_global,
 	argument_type_param,
@@ -44,6 +52,7 @@ typedef struct {
 		uint64_t value;
 		int index;
 		int offset;
+		virtual_register vreg;
 	} as;
 } argument;
 
@@ -265,6 +274,10 @@ inline static argument argument_none() {
 	return (argument){.type=argument_type_none};
 }
 
+inline static argument argument_register(virtual_register vreg) {
+	return (argument){.type=argument_type_vreg, .size=PTR_SIZE, .as={.vreg=vreg}};
+}
+
 inline static argument argument_string_literal(string str) {
 	argument arg = (argument){.type=argument_type_string, .size=PTR_SIZE, .as={.index=string_literals.len}};
 	array_append(&string_literals, str);
@@ -423,7 +436,7 @@ argument compile_binop(frame* frame, expression_tree expr_tree) {
 			if (!index.type) return argument_none();
 
 			argument dst = argument_allocate(frame, elemsize);
-			argument t0 = argument_allocate(frame, PTR_SIZE);
+			argument t0 = argument_register(R0);
 			add_instruction_op(op_addrof, t0, base);
 			add_instruction_op2(op_madd, t0, index, argument_literal(elemsize));
 			add_instruction_op2(op_load_indirect, dst, t0, argument_literal(elemsize));
@@ -434,7 +447,7 @@ argument compile_binop(frame* frame, expression_tree expr_tree) {
 			argument index = compile_expression(frame, expr_tree.operands.ptr[1]);
 			if (!index.type) return argument_none();
 
-			argument t0 = argument_allocate(frame, PTR_SIZE);
+			argument t0 = argument_register(R0);
 			add_instruction_op(op_store, t0, data);
 			add_instruction_op2(op_add, t0, t0, index);
 				
@@ -483,7 +496,7 @@ argument compile_binop(frame* frame, expression_tree expr_tree) {
 
 		argument base = argument_from_symbol(symbl);
 		argument dst = argument_allocate(frame, f.size);
-		argument t0 = argument_allocate(frame, PTR_SIZE);
+		argument t0 = argument_register(R0);
 		add_instruction_op(op_addrof, t0, base);
 		add_instruction_op2(op_add, t0, t0, argument_literal(f.offset));
 		add_instruction_op2(op_load_indirect, dst, t0, argument_literal(f.size));
@@ -611,9 +624,7 @@ void compile_statement(frame* frame, statement stm) {
 			return;
 		}
 
-		argument dst = argument_allocate(frame, size_of_type(&decl_type));
-		symbol_add(symbol_type_local, decl.identifier, decl_type, dst.as.offset);
-
+		argument dst; // = argument_allocate(frame, size_of_type(&decl_type));
 		if (decl.value.type != expression_type_none) {
 			argument src = compile_expression(frame, decl.value);
 			if (src.type == argument_type_none) return;
@@ -624,11 +635,17 @@ void compile_statement(frame* frame, statement stm) {
 				return;
 			}
 
-			if (dst.size <= PTR_SIZE)
-				add_instruction_op(op_store, dst, src);
-			else 
-				add_instruction_op2(op_copy, dst, src, argument_literal(dst.size));
+			if (src.type == argument_type_local) {
+				dst = src;
+			} else {
+				dst = argument_allocate(frame, size_of_type(&decl_type));
+				if (dst.size <= PTR_SIZE)
+					add_instruction_op(op_store, dst, src);
+				else 
+					add_instruction_op2(op_copy, dst, src, argument_literal(dst.size));
+			}
 		}
+		symbol_add(symbol_type_local, decl.identifier, decl_type, dst.as.offset);
 	} break;
 
 	case statement_type_assign: {
@@ -673,7 +690,7 @@ void compile_statement(frame* frame, statement stm) {
 			argument value = compile_expression(frame, assignment.value);
 			if (value.type == argument_type_none) return;
 
-			argument t0 = argument_allocate(frame, PTR_SIZE);
+			argument t0 = argument_register(R0);
 			add_instruction_op(op_addrof, t0, base);
 			add_instruction_op2(op_madd, t0, index, argument_literal(elemsize));
 			add_instruction_op2(op_store_indirect, t0, value, argument_literal(elemsize));
@@ -694,7 +711,7 @@ void compile_statement(frame* frame, statement stm) {
 			argument value = compile_expression(frame, assignment.value);
 			if (value.type == argument_type_none) return;
 
-			argument t0 = argument_allocate(frame, PTR_SIZE);
+			argument t0 = argument_register(R0);
 			add_instruction_op(op_addrof, t0, base);
 			add_instruction_op2(op_add, t0, t0, argument_literal(f.offset));
 			add_instruction_op2(op_store_indirect, t0, value, argument_literal(f.size));

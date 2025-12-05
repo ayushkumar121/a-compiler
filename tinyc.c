@@ -7,29 +7,28 @@ int error_count;
 #include "simulator.c"
 #include "codegen.c"
 
-typedef enum {
-	CMD_RUN,
-	CMD_BUILD
-} command_type;
+struct {
+	bool run;
+} flags;
 
 int main(int argc, char** argv) {
 	Args args = {1, argc, argv};
-
-	command_type command;
-	string command_str = args_next(&args);
-	if (string_eq(command_str, sv("run"))) {
-		command = CMD_RUN;
-	} else if (string_eq(command_str, sv("build")))  {
-		command = CMD_BUILD;
-	} else {
-		fprintf(stderr, "error: unknown command "sfmt"\n", sarg(command_str));
-		exit(1);
-	}
 
 	string file_path = args_next(&args);
 	if (file_path.len == 0) {
 		fprintf(stderr, "error: no file provided\n");
 		exit(1);
+	}
+
+	string flag = flag = args_next(&args);
+	while(flag.len != 0) {
+		if (string_eq(flag, sv("--run")) || string_eq(flag, sv("-r"))) {
+			flags.run = true;
+		} else {
+			fprintf(stderr, "error: unknown command "sfmt"\n", sarg(flag));
+			exit(1);
+		}
+		flag = args_next(&args);
 	}
 
 	if (!file_exists(file_path.ptr)) {
@@ -44,11 +43,9 @@ int main(int argc, char** argv) {
 		fprintf(stderr, "error: %d errors occured during compilation\n", error_count);
 		exit(1);
 	}
-
-	if (command == CMD_RUN) {
+	codegen(ir, file_path, detect_host_machine());
+	if (flags.run) {
 		simulate(ir);
-	} else {
-		codegen(ir, file_path, detect_host_machine());
 	}
 
 	return 0;

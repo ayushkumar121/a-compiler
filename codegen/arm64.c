@@ -18,12 +18,18 @@ void load_immediate(FILE* out, int reg, size_t size, size_t value) {
 }
 
 void load_arg(FILE* out, int reg, argument src) {
+	ASSERT(src.size <= PTR_SIZE);
 	char reg_size = src.size <= 4 ? 'w' : 'x';
 
 	switch(src.type) {
 	case argument_type_literal:
-		ASSERT(src.size <= 8);
 		load_immediate(out, reg, src.size, src.as.value);
+		break;
+
+	case argument_type_vreg:
+		if ((virtual_register)reg != src.as.vreg) {
+    		fprintf(out, "   mov %c%d, %c%d\n", reg_size, reg, reg_size, src.as.vreg);
+    	}
 		break;
 
 	case argument_type_local:
@@ -74,8 +80,15 @@ void load_addr(FILE* out, int reg, argument src) {
 }
 
 void store_arg(FILE* out, int reg, argument dst) {
+	ASSERT(dst.size <= PTR_SIZE);
 	char reg_size = dst.size <= 4? 'w':'x';
 	switch(dst.type) {
+	case argument_type_vreg:
+		if ((virtual_register)reg != dst.as.vreg) {
+    		fprintf(out, "   mov %c%d, %c%d\n", reg_size, dst.as.vreg, reg_size, reg);
+    	}
+		break;
+
 	case argument_type_local:
 		fprintf(out, "   str %c%d, [x29, #-%d]\n", reg_size, reg, dst.as.offset);
 		break;

@@ -47,6 +47,7 @@ uint32_t load32(argument src) {
 uint64_t load64(argument src) {
 	ASSERT(src.size >= 8);
 	switch(src.type) { 
+	case argument_type_vreg: return regs[src.as.vreg];
 	case argument_type_local: return *(uint64_t*)((uint8_t*)(uintptr_t)regs[29] - src.as.offset); 
 	case argument_type_global: return *(uint64_t*)(globals + src.as.offset); 
 	case argument_type_literal: return src.as.value; 
@@ -73,12 +74,16 @@ uint64_t load(argument src) {
 }
 
 void store(argument dst, uint64_t value) {
-	void* dst_ptr = argument_location(dst);
-	switch(dst.size) {
-	case 1: *(uint8_t*)dst_ptr = (uint8_t)value; break;
-	case 4: *(uint32_t*)dst_ptr = (uint32_t)value; break;
-	case 8: *(uint64_t*)dst_ptr = (uint64_t)value; break;
-	default: unreachable;
+	if (dst.type == argument_type_vreg) {
+		regs[dst.as.vreg] = value;
+	} else {
+		void* dst_ptr = argument_location(dst);
+		switch(dst.size) {
+		case 1: *(uint8_t*)dst_ptr = (uint8_t)value; break;
+		case 4: *(uint32_t*)dst_ptr = (uint32_t)value; break;
+		case 8: *(uint64_t*)dst_ptr = (uint64_t)value; break;
+		default: unreachable;
+		}
 	}
 }
 
