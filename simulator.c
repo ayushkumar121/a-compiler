@@ -266,6 +266,19 @@ void simulate(intermediate_representation ir) {
 		    }
 		} break;
 
+		case ins_jmp: {
+			pc = labelpos(ins.as.jmp.label);
+			continue;
+		} break;
+
+		case ins_jmp_ifnot: {
+				int cond = load(ins.as.jmpifnot.cond);
+				if (!cond) {
+					pc = labelpos(ins.as.jmpifnot.label);
+					continue;
+				} 
+		} break;
+
 		default: 
 			printf("unimplemented ins: %d\n", ins.type);
 			unreachable

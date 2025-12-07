@@ -131,6 +131,8 @@ keyword lexer_match_keyword(string s) {
 		return keyword_func;
 	} else if (keyword_cmp("if", s)) {
 		return keyword_if;
+	} else if (keyword_cmp("else", s)) {
+		return keyword_else;
 	} else if (keyword_cmp("for", s)) {
 		return keyword_for;
 	} else if (keyword_cmp("foreach", s)) {

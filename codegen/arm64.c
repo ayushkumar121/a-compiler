@@ -34,9 +34,8 @@ void load_arg(FILE* out, int reg, argument src) {
 		break;
 
 	case argument_type_vreg:
-		if (reg != vreg_mapping[src.as.vreg]) {
-    		fprintf(out, "   mov %c%d, %c%d\n", reg_size, reg, reg_size, vreg_mapping[src.as.vreg]);
-    	}
+		ASSERT(reg != vreg_mapping[src.as.vreg]);
+    	fprintf(out, "   mov %c%d, %c%d\n", reg_size, reg, reg_size, vreg_mapping[src.as.vreg]);
 		break;
 
 	case argument_type_local:
@@ -91,9 +90,8 @@ void store_arg(FILE* out, int reg, argument dst) {
 	char reg_size = dst.size <= 4? 'w':'x';
 	switch(dst.type) {
 	case argument_type_vreg:
-		if (reg != vreg_mapping[dst.as.vreg]) {
-    		fprintf(out, "   mov %c%d, %c%d\n", reg_size, vreg_mapping[dst.as.vreg], reg_size, reg);
-    	}
+		ASSERT(reg != vreg_mapping[dst.as.vreg]);
+    	fprintf(out, "   mov %c%d, %c%d\n", reg_size, vreg_mapping[dst.as.vreg], reg_size, reg);
 		break;
 
 	case argument_type_local:
@@ -124,7 +122,6 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 	fprintf(out, "   b .\n\n"); // noreturn
 
 	size_t frame_size;
-
 	for (int i=0; i<ir.instructions.len; i++) {
 		instruction ins = ir.instructions.ptr[i];
 		switch(ins.type){
@@ -231,13 +228,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 				ASSERT(ins.as.op.src2.type != argument_type_none);
 
 				load_arg(out, 0, ins.as.op.src1);
-			    if (ins.as.op.dst.size == 1) {
-			        fprintf(out, "   ldrb w0, [x0]\n");
-			    } else if (ins.as.op.dst.size == 2) {
-			        fprintf(out, "   ldrh w0, [x0]\n");
-			    } else {
-			        fprintf(out, "   ldr %c0, [x0]\n", ins.as.op.dst.size <= 4 ? 'w' : 'x');
-			    }
+			    fprintf(out, "   ldr %c0, [x0]\n", ins.as.op.dst.size <= 4 ? 'w' : 'x');
 				store_arg(out, 0, ins.as.op.dst);
 				break;
 
@@ -282,6 +273,16 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			}
 			}
 		} break;
+
+		case ins_jmp:
+			fprintf(out, "   b _"sfmt"\n", sarg(ins.as.jmp.label));
+			break;
+
+		case ins_jmp_ifnot:
+			load_arg(out, 0, ins.as.jmpifnot.cond); 
+			fprintf(out, "   cmp x0, #0\n");
+			fprintf(out, "   beq _"sfmt"\n", sarg(ins.as.jmpifnot.label));
+			break;
 
 		default: {
 			printf("unimplemented ins %d\n", ins.type);

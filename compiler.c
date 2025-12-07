@@ -5,6 +5,8 @@ typedef enum {
 	ins_func_end,
 	ins_func_call,
 	ins_ret,
+	ins_jmp,
+	ins_jmp_ifnot,
 } instruction_type;
 
 typedef enum {
@@ -72,6 +74,8 @@ typedef struct {
 		argument ret;
 		struct {op_type type; argument dst, src1, src2;} op;
 		struct {argument dst; string identifier; int argc; argument* args;} fcall;
+		struct {string label;} jmp;
+		struct {argument cond; string label;} jmpifnot;
 	} as;
 } instruction;
 
@@ -248,6 +252,14 @@ int alignment_of_type(type* type) {
 
 inline static void add_instruction_label(string label) {
 	array_append(&instructions, ((instruction){.type=ins_label, .as = {.label=label}}));
+}
+
+inline static void add_instruction_jmp(string label) {
+	array_append(&instructions, ((instruction){.type=ins_jmp, .as = {.jmp={label=label}}}));
+}
+
+inline static void add_instruction_jmpifnot(argument cond, string label) {
+	array_append(&instructions, ((instruction){.type=ins_jmp_ifnot, .as = {.jmpifnot={.cond=cond, .label=label}}}));
 }
 
 inline static void add_instruction_func_start(frame* frame) {
@@ -615,9 +627,100 @@ void compile_statement_list(frame* frame, statement_list stms) {
 	}
 }
 
+void compile_assignment(frame* frame, statement_assign assignment) {
+	symbol* symbl = symbol_lookup(assignment.lvalue.identifier, symbol_type_local);
+	if (!symbl) symbl = symbol_lookup(assignment.lvalue.identifier, symbol_type_global);
+	if (!symbl) {
+		report_compiler_error(loc, tconcat(sv("unknown identifier "), assignment.lvalue.identifier));
+		return;
+	}
+	type* decl_type = symbl->type;
+
+	switch(assignment.lvalue.type) {
+	case lvalue_type_variable: {
+		argument dst = argument_from_symbol(symbl);
+		argument src = compile_expression(frame, assignment.value);
+		if (src.type == argument_type_none) return;
+
+		type value_type = type_of_expression(assignment.value);
+		if (!type_eq(decl_type, &value_type)) {
+			report_compiler_error(loc, type_mismatch_error(*decl_type, value_type));
+			return;
+		}
+
+		if (dst.size <= PTR_SIZE)
+			add_instruction_op(op_store, dst, src);
+		else 
+			add_instruction_op2(op_copy, dst, src, argument_literal(dst.size));
+	} break;
+
+	case lvalue_type_indexed: {
+		if (decl_type->type != type_array) {
+			report_compiler_error(loc, tconcat(sv("cannot index into "), assignment.lvalue.identifier));
+			return;
+		}
+
+		type* elemtype = decl_type->as.array.inner;
+		type value_type = type_of_expression(assignment.value);
+		if (!type_eq(elemtype, &value_type)) {
+			report_compiler_error(loc, type_mismatch_error(*elemtype, value_type));
+			return;
+		}
+
+		int elemsize = size_of_type(decl_type->as.array.inner);
+		argument base = argument_from_symbol(symbl);
+		argument index = compile_expression(frame, assignment.lvalue.as.index);
+		if (index.type == argument_type_none) return;
+		argument value = compile_expression(frame, assignment.value);
+		if (value.type == argument_type_none) return;
+
+		argument t0 = argument_register(R0);
+		add_instruction_op(op_addrof, t0, base);
+		add_instruction_op2(op_madd, t0, index, argument_literal(elemsize));
+
+		if (elemsize <= PTR_SIZE)
+			add_instruction_op2(op_store_indirect, t0, value, argument_literal(elemsize));
+		else {
+			argument t1 = argument_register(R1);
+			add_instruction_op(op_addrof, t1, value);
+			add_instruction_op2(op_copy, t0, t1, argument_literal(elemsize));
+		}
+	} break;
+
+	case lvalue_type_field: {
+		if (decl_type->type != type_struct) {
+			report_compiler_error(loc, tconcat(sv("cannot access field of "), assignment.lvalue.identifier));
+			return;
+		}
+
+		field f = struct_field(decl_type->as.structure, assignment.lvalue.as.field);
+		if (f.offset == -1) {
+			report_compiler_error(loc, tconcat(sv("unknown field "), assignment.lvalue.as.field));
+			return;
+		}
+
+		type value_type = type_of_expression(assignment.value);
+		if (!type_eq(&f.type, &value_type)) {
+			report_compiler_error(loc, type_mismatch_error(f.type, value_type));
+			return;
+		}
+
+		argument dst = argument_field(argument_from_symbol(symbl), f.offset, f.size);
+		argument src = compile_expression(frame, assignment.value);
+		if (src.type == argument_type_none) return;
+
+		if (dst.size <= PTR_SIZE)
+			add_instruction_op(op_store, dst, src);
+		else 
+			add_instruction_op2(op_copy, dst, src, argument_literal(dst.size));
+	} break;
+
+	default: unreachable;
+	}
+}
+
 void compile_statement(frame* frame, statement stm) {
 	loc = stm.loc;
-
 	switch(stm.type) {
 	case statement_type_list: {
 		symbol* saved = symbol_top;
@@ -660,97 +763,7 @@ void compile_statement(frame* frame, statement stm) {
 	} break;
 
 	case statement_type_assign: {
-		statement_assign assignment = stm.as.assignment;
-
-		symbol* symbl = symbol_lookup(assignment.lvalue.identifier, symbol_type_local);
-		if (!symbl) symbl = symbol_lookup(assignment.lvalue.identifier, symbol_type_global);
-		if (!symbl) {
-			report_compiler_error(loc, tconcat(sv("unknown identifier "), assignment.lvalue.identifier));
-			return;
-		}
-		type* decl_type = symbl->type;
-
-		switch(assignment.lvalue.type) {
-		case lvalue_type_variable: {
-			argument dst = argument_from_symbol(symbl);
-			argument src = compile_expression(frame, assignment.value);
-			if (src.type == argument_type_none) return;
-
-			type value_type = type_of_expression(assignment.value);
-			if (!type_eq(decl_type, &value_type)) {
-				report_compiler_error(loc, type_mismatch_error(*decl_type, value_type));
-				return;
-			}
-
-			if (dst.size <= PTR_SIZE)
-				add_instruction_op(op_store, dst, src);
-			else 
-				add_instruction_op2(op_copy, dst, src, argument_literal(dst.size));
-		} break;
-
-		case lvalue_type_indexed: {
-			if (decl_type->type != type_array) {
-				report_compiler_error(loc, tconcat(sv("cannot index into "), assignment.lvalue.identifier));
-				return;
-			}
-
-			type* elemtype = decl_type->as.array.inner;
-			type value_type = type_of_expression(assignment.value);
-			if (!type_eq(elemtype, &value_type)) {
-				report_compiler_error(loc, type_mismatch_error(*elemtype, value_type));
-				return;
-			}
-
-			int elemsize = size_of_type(decl_type->as.array.inner);
-			argument base = argument_from_symbol(symbl);
-			argument index = compile_expression(frame, assignment.lvalue.as.index);
-			if (index.type == argument_type_none) return;
-			argument value = compile_expression(frame, assignment.value);
-			if (value.type == argument_type_none) return;
-
-			argument t0 = argument_register(R0);
-			add_instruction_op(op_addrof, t0, base);
-			add_instruction_op2(op_madd, t0, index, argument_literal(elemsize));
-
-			if (elemsize <= PTR_SIZE)
-				add_instruction_op2(op_store_indirect, t0, value, argument_literal(elemsize));
-			else {
-				argument t1 = argument_register(R1);
-				add_instruction_op(op_addrof, t1, value);
-				add_instruction_op2(op_copy, t0, t1, argument_literal(elemsize));
-			}
-		} break;
-
-		case lvalue_type_field: {
-			if (decl_type->type != type_struct) {
-				report_compiler_error(loc, tconcat(sv("cannot access field of "), assignment.lvalue.identifier));
-				return;
-			}
-
-			field f = struct_field(decl_type->as.structure, assignment.lvalue.as.field);
-			if (f.offset == -1) {
-				report_compiler_error(loc, tconcat(sv("unknown field "), assignment.lvalue.as.field));
-				return;
-			}
-
-			type value_type = type_of_expression(assignment.value);
-			if (!type_eq(&f.type, &value_type)) {
-				report_compiler_error(loc, type_mismatch_error(f.type, value_type));
-				return;
-			}
-
-			argument dst = argument_field(argument_from_symbol(symbl), f.offset, f.size);
-			argument src = compile_expression(frame, assignment.value);
-			if (src.type == argument_type_none) return;
-
-			if (dst.size <= PTR_SIZE)
-				add_instruction_op(op_store, dst, src);
-			else 
-				add_instruction_op2(op_copy, dst, src, argument_literal(dst.size));
-		} break;
-
-		default: unreachable;
-		}
+		compile_assignment(frame, stm.as.assignment);
 	} break;
 
 	case statement_type_return: {
@@ -773,7 +786,35 @@ void compile_statement(frame* frame, statement stm) {
 			value = argument_none();
 		}
 		add_instruction_ret(value);
+		add_instruction_jmp(strconcat(sv(".end_"), current_func_name));
 		return;
+	} break;
+
+	case statement_type_if: {
+		argument cond = compile_expression(frame, stm.as.iff.condition);
+		if (cond.type == argument_type_none) return;
+		if (cond.size > PTR_SIZE) {
+			report_compiler_error(loc, sv("condition must be integeral"));
+			return;
+		}
+
+		static int if_counter = 0;
+		string else_label = tsprintf(".else%d", if_counter);
+		string end_label = tsprintf(".ifend%d", if_counter);
+		if_counter++;
+
+		// if only case
+		if (stm.as.iff.else_body.len == 0) {
+			add_instruction_jmpifnot(cond, end_label);
+			compile_statement_list(frame, stm.as.iff.iff_body);
+		} else { // if else case
+			add_instruction_jmpifnot(cond, else_label);
+			compile_statement_list(frame, stm.as.iff.iff_body);
+			add_instruction_jmp(end_label);
+			add_instruction_label(else_label);
+			compile_statement_list(frame, stm.as.iff.else_body);
+		}
+		add_instruction_label(end_label);
 	} break;
 
 	default: unreachable;
@@ -823,6 +864,7 @@ void compile_function(function func) {
 	compile_statement_list(frame, func.body);
 	symbol_top = saved;
 
+	add_instruction_label(strconcat(sv(".end_"), func.identifier));
 	add_instruction_func_end(frame);
 }
 

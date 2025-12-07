@@ -231,7 +231,8 @@ typedef struct {
 
 typedef struct {
 	expression condition;
-	statement_list body;
+	statement_list iff_body;
+	statement_list else_body;
 } statement_if;
 
 typedef struct {
@@ -924,6 +925,9 @@ declaration parse_declaration(lexer* lex) {
 statement parse_statement(lexer* lex) {
 	static_assert(statement_type_none == 7, "parse_statement needs updating");
 
+	// consume semicolon as empty statements
+	while (lexer_peek_token(lex).type == token_semicolon) lexer_next_token(lex);
+
 	statement s = {0};
 	s.loc = lexer_current_loc(lex);
 
@@ -941,6 +945,15 @@ statement parse_statement(lexer* lex) {
 			}
 			s.as.ret.value = expr;
 		}
+
+		// expected ; after statement
+		if (lexer_peek_token(lex).type == token_semicolon) lexer_next_token(lex);
+		else {
+			printf(sfmt"\n", sarg(lexer_current_value(lex)));
+			report_parser_error(lex, sv("expected semicolon"));
+			synchronise(lex, synchronise_token_statement);
+			return statement_error;
+		}
 	} else if (t.type == token_keyword && t.keyword == keyword_if) {
 		lexer_next_token(lex);
 		s.type = statement_type_if;
@@ -955,14 +968,36 @@ statement parse_statement(lexer* lex) {
 			while(token_not_empty_or_equals(lex, token_right_curly)) {
 				statement st = parse_statement(lex);
 				if (st.type != statement_type_none) {
-					array_append(&(s.as.iff.body), st);
+					array_append(&(s.as.iff.iff_body), st);
 				}
 			}
 			lexer_next_token(lex);
 		} else {
 			statement st = parse_statement(lex);
 			if (st.type != statement_type_none) {
-				array_append(&(s.as.iff.body), st);
+				array_append(&(s.as.iff.iff_body), st);
+			}
+		}
+
+		// Else block is optional
+		t = lexer_peek_token(lex);
+		printf("we have else token! "sfmt" %d %d\n", sarg(t.value), t.type, t.keyword);
+		if (t.type == token_keyword && t.keyword == keyword_else) {
+			lexer_next_token(lex);
+			if (t.type == token_left_curly) {
+				lexer_next_token(lex);
+				while(token_not_empty_or_equals(lex, token_right_curly)) {
+					statement st = parse_statement(lex);
+					if (st.type != statement_type_none) {
+						array_append(&(s.as.iff.else_body), st);
+					}
+				}
+				lexer_next_token(lex);
+			} else {
+				statement st = parse_statement(lex);
+				if (st.type != statement_type_none) {
+					array_append(&(s.as.iff.else_body), st);
+				}
 			}
 		}
 	} else if (t.type == token_keyword && t.keyword == keyword_while) {
@@ -998,6 +1033,15 @@ statement parse_statement(lexer* lex) {
 			return statement_error;
 		}
 		s.as.declaration = decl;
+
+		// expected ; after statement
+		if (lexer_peek_token(lex).type == token_semicolon) lexer_next_token(lex);
+		else {
+			printf(sfmt"\n", sarg(lexer_current_value(lex)));
+			report_parser_error(lex, sv("expected semicolon"));
+			synchronise(lex, synchronise_token_statement);
+			return statement_error;
+		}
 	} else if (t.type == token_identifier) {
 		lexer_next_token(lex);
 		string identifier = t.value;
@@ -1107,6 +1151,15 @@ statement parse_statement(lexer* lex) {
         	synchronise(lex, synchronise_token_statement);
 			return statement_error;
 		}
+
+		// expected ; after statement
+		if (lexer_peek_token(lex).type == token_semicolon) lexer_next_token(lex);
+		else {
+			printf(sfmt"\n", sarg(lexer_current_value(lex)));
+			report_parser_error(lex, sv("expected semicolon"));
+			synchronise(lex, synchronise_token_statement);
+			return statement_error;
+		}
 	} else if (t.type == token_left_curly) {
 		lexer_next_token(lex);
 		s.type = statement_type_list;
@@ -1120,14 +1173,6 @@ statement parse_statement(lexer* lex) {
 		lexer_next_token(lex);
 	} else {
 		report_parser_error(lex, tconcat(sv("unexpected token "), t.value));
-		synchronise(lex, synchronise_token_statement);
-		return statement_error;
-	}
-
-	if (lexer_peek_token(lex).type == token_semicolon) lexer_next_token(lex);
-	else {
-		printf(sfmt"\n", sarg(lexer_current_value(lex)));
-		report_parser_error(lex, sv("expected semicolon"));
 		synchronise(lex, synchronise_token_statement);
 		return statement_error;
 	}
