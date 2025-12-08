@@ -99,7 +99,7 @@ void simulate(intermediate_representation ir) {
 	fprintf(stderr, "info: running program\n");
 	fprintf(stderr, "info: instruction count: %d\n", ir.instructions.len);
 
-	string_literals = ir.strings;
+	string_literals = ir.string_literals;
 
 	int pc = -1;
 	for (int i = 0; i < ir.instructions.len; ++i) {
@@ -158,11 +158,24 @@ void simulate(intermediate_representation ir) {
 		        regs[30] = INVALID_RET;
 		        break; 
     		}
+    		int reg = 0;
 			for (int i = 0; i < ins.as.fcall.argc; ++i) {
-				uint64_t value = load(ins.as.fcall.args[i]);
 				if (i < 8) {
-            		regs[i] = value;
+					if (ins.as.fcall.args[i].size <= PTR_SIZE) {
+						regs[reg++] = load(ins.as.fcall.args[i]);
+					} else if (ins.as.fcall.args[i].size <= 2*PTR_SIZE) {
+						// TODO: find actual field size
+						regs[reg++] = load(argument_field(ins.as.fcall.args[i], 0, PTR_SIZE));
+						regs[reg++] = load(argument_field(ins.as.fcall.args[i], PTR_SIZE, PTR_SIZE));
+					} else {
+						regs[reg++] = (uintptr_t)argument_location(ins.as.fcall.args[i]);
+					}
 		        } else {
+					uint64_t value;
+					if (ins.as.fcall.args[i].size <= PTR_SIZE)
+		            	value = load(ins.as.fcall.args[i]);
+		            else
+		            	value = (uint64_t)argument_location(ins.as.fcall.args[i]);
 		            uint64_t* fp_words = (uint64_t*)(uintptr_t)regs[29];
 		            fp_words[i - 8] = value;
 		        }
@@ -206,13 +219,18 @@ void simulate(intermediate_representation ir) {
 			} break;
 
 			case op_load_param: {
-				ASSERT(ins.as.op.dst.size <= PTR_SIZE);
 				ASSERT(ins.as.op.src1.size <=  ins.as.op.dst.size);
 				ASSERT(ins.as.op.src1.type ==  argument_type_param);
 
 			    int idx = ins.as.op.src1.as.index;
 			    if (idx < 8) {
-			        store(ins.as.op.dst, regs[idx]);
+			    	if (ins.as.op.src1.size <= PTR_SIZE) {
+						store(ins.as.op.dst, regs[idx]);
+					} else if (ins.as.op.src1.size <= 2*PTR_SIZE) {
+						// TODO: find actual field size
+						store(argument_field(ins.as.op.dst, 0, PTR_SIZE), regs[idx]);
+						store(argument_field(ins.as.op.dst, PTR_SIZE, PTR_SIZE), regs[idx+1]);
+					} else unreachable;
 			    } else {
 			        uint64_t* fp_words = (uint64_t*)(uintptr_t)regs[29];
 			        store(ins.as.op.dst, fp_words[idx - 8]);

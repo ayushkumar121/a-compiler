@@ -1,8 +1,8 @@
 int vreg_mapping[R_Count] = {
-	[R0] = 4, //x4
-	[R1] = 5, //x5
-	[R2] = 6, //x6
-	[R3] = 7, //x7
+	[R0] = 9, //x4
+	[R1] = 10, //x5
+	[R2] = 11, //x6
+	[R3] = 12, //x7
 };
 
 void load_immediate(FILE* out, int reg, size_t size, size_t value) {
@@ -49,36 +49,8 @@ void load_arg(FILE* out, int reg, argument src) {
 		break;
 
 	case argument_type_string:
-    	fprintf(out, "   adrp x%d, .LC%d@PAGE\n", reg, src.as.index);
-		fprintf(out, "   add x%d, x%d, .LC%d@PAGEOFF\n", reg, reg, src.as.index);
-		break;
-
-	default: unreachable;
-	}
-}
-
-void load_param(FILE* out, int index, argument dst) {
-	char reg_size = dst.size <= 4? 'w':'x';
-	ASSERT(dst.type == argument_type_local);
-	if (index < 8) {
-        fprintf(out, "    str %c%d, [x29, #-%d]\n", reg_size, index, dst.as.offset);
-    } else {
-        int slot = index - 8;
-        fprintf(out, "    ldr %c0, [x29, #%d]\n",reg_size,  16 + slot*8);
-        fprintf(out, "    str %c0, [x29, #-%d]\n",reg_size, dst.as.offset);
-    }
-}
-
-void load_addr(FILE* out, int reg, argument src) {
-	switch(src.type) {
-	case argument_type_local:
-		fprintf(out, "   sub x%d, x29, #%d\n", reg, src.as.offset);
-		break;
-
-	case argument_type_global:
-		fprintf(out, "   adrp x0, _globals@PAGE\n");
-		fprintf(out, "   add x0, x0, _globals@PAGEOFF\n");
-		fprintf(out, "   add x%d, x0, #%d\n", reg, src.as.offset);
+    	fprintf(out, "   adrp x%d, .S%d@PAGE\n", reg, src.as.index);
+		fprintf(out, "   add x%d, x%d, .S%d@PAGEOFF\n", reg, reg, src.as.index);
 		break;
 
 	default: unreachable;
@@ -108,6 +80,43 @@ void store_arg(FILE* out, int reg, argument dst) {
 	}
 }
 
+void load_addr(FILE* out, int reg, argument src) {
+	switch(src.type) {
+	case argument_type_local:
+		fprintf(out, "   sub x%d, x29, #%d\n", reg, src.as.offset);
+		break;
+
+	case argument_type_global:
+		fprintf(out, "   adrp x0, _globals@PAGE\n");
+		fprintf(out, "   add x0, x0, _globals@PAGEOFF\n");
+		fprintf(out, "   add x%d, x0, #%d\n", reg, src.as.offset);
+		break;
+
+	default: unreachable;
+	}
+}
+
+void load_param(FILE* out, argument src, argument dst) {	
+	ASSERT(dst.type == argument_type_local);
+	ASSERT(src.type == argument_type_param);
+
+	int index = src.as.index;
+	char reg_size = dst.size <= 4? 'w':'x';
+	if (index < 8) {
+		if (src.size <= PTR_SIZE) {
+        	fprintf(out, "    str %c%d, [x29, #-%d]\n",  reg_size, src.as.index, dst.as.offset);
+    	} else if (src.size <= 2*PTR_SIZE) {
+			// TODO: find actual field size
+    		store_arg(out, src.as.index, argument_field(dst, 0, PTR_SIZE));
+    		store_arg(out, src.as.index+1, argument_field(dst, PTR_SIZE, PTR_SIZE));
+    	} else unreachable;
+    } else {
+        int slot = index - 8;
+        fprintf(out, "    ldr %c0, [x29, #%d]\n", reg_size,  16 + slot*8);
+        fprintf(out, "    str %c0, [x29, #-%d]\n",reg_size, dst.as.offset);
+    }
+}
+
 void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 	fprintf(stderr, "info: generating %.*s\n", sarg(asm_path));
 	FILE* out = fopen(asm_path.ptr, "w+");
@@ -116,10 +125,31 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 	fprintf(out, ".global _start\n\n");
 	fprintf(out, "_start:\n");
 	fprintf(out, "   bl _main\n");
-	fprintf(out, "   movz x16, #0x1\n");
-	fprintf(out, "   movk x16, #0x200, lsl #16\n");
-	fprintf(out, "   svc #0\n");
-	fprintf(out, "   b .\n\n"); // noreturn
+	fprintf(out, "   b _exit\n");
+
+	for (int i = 0; i <builtin_count; ++i){
+		switch(i) {
+		case builtin_print: 
+			fprintf(out, "_print:\n");
+			fprintf(out, "   mov x2, x0\n");
+			fprintf(out, "   mov x0, #1\n"); // SYS_OUT
+			fprintf(out, "   movz x16, #0x4\n");
+			fprintf(out, "   movk x16, #0x200, lsl #16\n");
+			fprintf(out, "   svc #0\n");
+			fprintf(out, "   ret\n");
+			break;
+		case builtin_exit:
+			fprintf(out, "_exit:\n");
+			fprintf(out, "   movz x16, #0x1\n");
+			fprintf(out, "   movk x16, #0x200, lsl #16\n");
+			fprintf(out, "   svc #0\n");
+			fprintf(out, "   b .\n");
+		 	break;
+		case builtin_count: break;
+		}
+	}
+
+	fprintf(out, "\n\n");
 
 	size_t frame_size;
 	for (int i=0; i<ir.instructions.len; i++) {
@@ -147,13 +177,25 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 
 		case ins_func_call: 
 			fprintf(out, "; ins_func_call\n");
+			int reg = 0;
 			for (int i = 0; i < ins.as.fcall.argc; ++i) {
 				if (i < 8) {
-					load_arg(out, i, ins.as.fcall.args[i]);
+					if (ins.as.fcall.args[i].size <= PTR_SIZE) {
+						load_arg(out, reg++, ins.as.fcall.args[i]);
+					} else if (ins.as.fcall.args[i].size <= 2*PTR_SIZE) {
+						// TODO: find actual field size
+						load_arg(out, reg++, argument_field(ins.as.fcall.args[i], 0, PTR_SIZE));
+						load_arg(out, reg++, argument_field(ins.as.fcall.args[i], PTR_SIZE, PTR_SIZE));
+					} else {
+						load_addr(out, reg++, ins.as.fcall.args[i]);
+					}
 		        } else {
 		            int slot = i - 8;
 		            int offset = 16 + slot * 8;
-		            load_arg(out, 0, ins.as.fcall.args[i]);
+		            if (ins.as.fcall.args[i].size <= PTR_SIZE)
+		            	load_arg(out, 0, ins.as.fcall.args[i]);
+		            else
+		            	load_addr(out, 0, ins.as.fcall.args[i]);
 		            fprintf(out, "   str x0, [x29, #-%d]\n", offset);
 		        }
 			}
@@ -218,8 +260,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 
 			case op_load_param:
 				fprintf(out, "; op_load_param\n");
-				ASSERT(ins.as.op.src1.type == argument_type_param);
-				load_param(out, ins.as.op.src1.as.index, ins.as.op.dst);
+				load_param(out, ins.as.op.src1, ins.as.op.dst);
 				break;
 
 			case op_load_indirect:
@@ -291,11 +332,11 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		}
 	}
 
-	if (ir.strings.len > 0) {
+	if (ir.string_literals.len > 0) {
 		fprintf(out, ".section __TEXT,__cstring,cstring_literals\n");
-		for (int i=0; i<ir.strings.len; i++) {
-			fprintf(out, ".LC%d:\n", i);
-			fprintf(out, "  .string \""sfmt"\"\n", sarg(string_unescape(ir.strings.ptr[i])));
+		for (int i=0; i<ir.string_literals.len; i++) {
+			fprintf(out, ".S%d:\n", i);
+			fprintf(out, "  .string \""sfmt"\"\n", sarg(string_unescape(ir.string_literals.ptr[i])));
 		}
 	}
 

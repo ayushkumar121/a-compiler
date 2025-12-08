@@ -1,0 +1,8 @@
+func println(message string) {
+	print(message);
+	print("\n");
+}
+
+func main() {
+	println("Hello world");
+}

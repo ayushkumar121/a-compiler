@@ -1,4 +1,10 @@
 typedef enum {
+	builtin_print,
+	builtin_exit,
+	builtin_count
+} builtin;
+
+typedef enum {
 	ins_label,
 	ins_binop,
 	ins_func_start,
@@ -86,7 +92,7 @@ typedef struct {
 } instruction_list;
 
 typedef struct {
-	strings strings;
+	strings string_literals;
 	instruction_list instructions;
 } intermediate_representation;
 
@@ -799,22 +805,29 @@ void compile_statement(frame* frame, statement stm) {
 		}
 
 		static int if_counter = 0;
-		string else_label = tsprintf(".else%d", if_counter);
-		string end_label = tsprintf(".ifend%d", if_counter);
+		string if_label = tsprintf(".if_%d", if_counter);
+		string else_label = tsprintf(".else_%d", if_counter);
+		string end_label = tsprintf(".end_%d", if_counter);
 		if_counter++;
 
 		// if only case
 		if (stm.as.iff.else_body.len == 0) {
 			add_instruction_jmpifnot(cond, end_label);
+			add_instruction_label(if_label);
 			compile_statement_list(frame, stm.as.iff.iff_body);
 		} else { // if else case
 			add_instruction_jmpifnot(cond, else_label);
+			add_instruction_label(if_label);
 			compile_statement_list(frame, stm.as.iff.iff_body);
 			add_instruction_jmp(end_label);
 			add_instruction_label(else_label);
 			compile_statement_list(frame, stm.as.iff.else_body);
 		}
 		add_instruction_label(end_label);
+	} break;
+
+	case statement_type_func_call: {
+		(void)compile_fcall(frame, stm.as.func_call);
 	} break;
 
 	default: unreachable;
@@ -868,8 +881,38 @@ void compile_function(function func) {
 	add_instruction_func_end(frame);
 }
 
+void compile_builtin(builtin b) {
+	switch(b) {
+	case builtin_print: {
+		type typ = {0};
+		typ.type = type_function;
+		typ.as.function.return_type = malloc(sizeof(type));
+		typ.as.function.identifier = sv("print");
+		*(typ.as.function.return_type) = type_of_primitive(primitive_void);
+		array_append(&typ.as.function.arguments, type_of_primitive(primitive_string));
+		symbol_add(symbol_type_function, typ.as.function.identifier, typ, 0);
+	} break;
+	
+	case builtin_exit: {
+		type typ = {0};
+		typ.type = type_function;
+		typ.as.function.return_type = malloc(sizeof(type));
+		typ.as.function.identifier = sv("exit");
+		*(typ.as.function.return_type) = type_of_primitive(primitive_void);
+		array_append(&typ.as.function.arguments, type_of_primitive(primitive_int));
+		symbol_add(symbol_type_function, typ.as.function.identifier, typ, 0);
+	} break;
+
+	case builtin_count: break;
+	}
+}
+
 intermediate_representation compile(program prg) {
 	fprintf(stderr, "info: compiling program\n");
+
+	for (int i = 0; i <builtin_count; ++i){
+		compile_builtin(i);
+	}
 
 	for (int i=0; i<prg.structs.len; i++) {
 		compile_structure(prg.structs.ptr[i]);
