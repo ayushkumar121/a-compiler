@@ -1,3 +1,5 @@
+#include <unistd.h>
+
 typedef struct {
 	string identifier;
 	int pos;
@@ -74,6 +76,7 @@ uint64_t load(argument src) {
 }
 
 void store(argument dst, uint64_t value) {
+	if (dst.size == 0) return;
 	if (dst.type == argument_type_vreg) {
 		regs[dst.as.vreg] = value;
 	} else {
@@ -93,6 +96,27 @@ int labelpos(string identifier) {
 		if(string_eq(l.identifier, identifier)) return l.pos;
 	}
 	unreachable;
+}
+
+int resolve_builint(string id) {
+	static_assert(builtin_count == 2, "This function needs updating");
+	if (string_eq(id, sv("print"))) return builtin_print;
+	else if (string_eq(id, sv("exit"))) return builtin_exit;
+	return -1;
+}
+
+void execute_builtin(builtin id) {
+	switch(id) {
+		case builtin_print: {
+			write(1, (char*)regs[1], (int)regs[0]);
+		} break;
+		case builtin_exit: {
+			exit(regs[0]);
+		} break;
+		case builtin_count: unreachable;
+	}
+
+	regs[0] = 0;
 }
 
 void simulate(intermediate_representation ir) {
@@ -180,8 +204,14 @@ void simulate(intermediate_representation ir) {
 		            fp_words[i - 8] = value;
 		        }
 			}
+
 			regs[30] = (uint64_t)pc;
-			pc = labelpos(ins.as.fcall.identifier);
+			int fid = resolve_builint(ins.as.fcall.identifier);
+			if (fid != -1) {
+				execute_builtin(fid);
+			} else {
+				pc = labelpos(ins.as.fcall.identifier);
+			}
 			continue;
 		} break;
 

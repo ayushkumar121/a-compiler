@@ -25,6 +25,7 @@ void load_immediate(FILE* out, int reg, size_t size, size_t value) {
 }
 
 void load_arg(FILE* out, int reg, argument src) {
+	ASSERT(src.size > 0);
 	ASSERT(src.size <= PTR_SIZE);
 	char reg_size = src.size <= 4 ? 'w' : 'x';
 
@@ -58,6 +59,7 @@ void load_arg(FILE* out, int reg, argument src) {
 }
 
 void store_arg(FILE* out, int reg, argument dst) {
+	if (dst.size == 0) return;
 	ASSERT(dst.size <= PTR_SIZE);
 	char reg_size = dst.size <= 4? 'w':'x';
 	switch(dst.type) {
