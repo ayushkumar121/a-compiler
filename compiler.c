@@ -72,16 +72,21 @@ typedef struct {
 } frame;
 
 typedef struct {
+	string name;
+	bool is_func;
+} label;
+
+typedef struct {
 	instruction_type type;
 	lexer_file_loc loc;
 	union {
-		string label;
 		frame* frame;
 		argument ret;
+		label label;
 		struct {op_type type; argument dst, src1, src2;} op;
 		struct {argument dst; string identifier; int argc; argument* args;} fcall;
-		struct {string label;} jmp;
-		struct {argument cond; string label;} jmpifnot;
+		struct {label label;} jmp;
+		struct {argument cond; label label;} jmpifnot;
 	} as;
 } instruction;
 
@@ -122,6 +127,7 @@ strings string_literals = {0};
 instruction_list instructions = {0};
 lexer_file_loc loc;
 string current_func_name;
+string current_func_name_end;
 
 void symbol_add(symbol_type symbol_type, string identifier, type type, int offset) {
 	symbol* new_symbol = malloc(sizeof(symbol));
@@ -256,15 +262,24 @@ int alignment_of_type(type* type) {
 	}
 }
 
-inline static void add_instruction_label(string label) {
+
+inline static label label_simple(string name) {
+	return (label){.name={.len=name.len, .ptr=strndup(name.ptr, name.len)}, .is_func=false};
+}
+
+inline static label label_func(string name) {
+	return (label){.name={.len=name.len, .ptr=strndup(name.ptr, name.len)}, .is_func=true};
+}
+
+inline static void add_instruction_label(label label) {
 	array_append(&instructions, ((instruction){.type=ins_label, .as = {.label=label}}));
 }
 
-inline static void add_instruction_jmp(string label) {
+inline static void add_instruction_jmp(label label) {
 	array_append(&instructions, ((instruction){.type=ins_jmp, .as = {.jmp={label=label}}}));
 }
 
-inline static void add_instruction_jmpifnot(argument cond, string label) {
+inline static void add_instruction_jmpifnot(argument cond, label label) {
 	array_append(&instructions, ((instruction){.type=ins_jmp_ifnot, .as = {.jmpifnot={.cond=cond, .label=label}}}));
 }
 
@@ -792,8 +807,7 @@ void compile_statement(frame* frame, statement stm) {
 			value = argument_none();
 		}
 		add_instruction_ret(value);
-		add_instruction_jmp(strconcat(sv(".end_"), current_func_name));
-		return;
+		add_instruction_jmp(label_simple(current_func_name_end));
 	} break;
 
 	case statement_type_if: {
@@ -805,19 +819,16 @@ void compile_statement(frame* frame, statement stm) {
 		}
 
 		static int if_counter = 0;
-		string if_label = tsprintf(".if_%d", if_counter);
-		string else_label = tsprintf(".else_%d", if_counter);
-		string end_label = tsprintf(".end_%d", if_counter);
+		label else_label = label_simple(tsprintf("else%d", if_counter));
+		label end_label = label_simple(tsprintf("end%d", if_counter));
 		if_counter++;
 
 		// if only case
 		if (stm.as.iff.else_body.len == 0) {
 			add_instruction_jmpifnot(cond, end_label);
-			add_instruction_label(if_label);
 			compile_statement_list(frame, stm.as.iff.iff_body);
 		} else { // if else case
 			add_instruction_jmpifnot(cond, else_label);
-			add_instruction_label(if_label);
 			compile_statement_list(frame, stm.as.iff.iff_body);
 			add_instruction_jmp(end_label);
 			add_instruction_label(else_label);
@@ -848,17 +859,18 @@ void compile_function(function func) {
 
 	loc = func.loc;
 	current_func_name = func.identifier;
+	current_func_name_end = strconcat(func.identifier, sv("_end"));
+
 	if (symbol_lookup(func.identifier, symbol_type_function)) {
 		report_compiler_error(loc, tconcat(sv("redefinition of function "), func.identifier));
 		return;
 	}
 	symbol_add(symbol_type_function, func.identifier, type_of_function(func), 0);
 
-	add_instruction_label(func.identifier);
+	add_instruction_label(label_func(func.identifier));
 	frame* frame = calloc(1, sizeof(*frame));
 	frame->identifier = func.identifier;
 	add_instruction_func_start(frame);
-
 	symbol* saved = symbol_top;
 	for (int i=0; i<func.arguments.len; i++) {
 		binding bind = func.arguments.ptr[i];
@@ -876,8 +888,7 @@ void compile_function(function func) {
 	}
 	compile_statement_list(frame, func.body);
 	symbol_top = saved;
-
-	add_instruction_label(strconcat(sv(".end_"), func.identifier));
+	add_instruction_label(label_simple(current_func_name_end));
 	add_instruction_func_end(frame);
 }
 

@@ -3,13 +3,13 @@
 typedef struct {
 	string identifier;
 	int pos;
-} label;
+} label_pos;
 
 typedef struct {
 	int len;
 	int cap;
-	label* ptr;
-} label_list;
+	label_pos* ptr;
+} label_pos_list;
 
 #define INVALID_RET (uint64_t)-1
 #define STACK_CAP (1024)
@@ -24,7 +24,7 @@ uint64_t* stack_ptr = &stack[STACK_CAP-1];
 uint64_t regs[32];
 
 strings string_literals;
-label_list labels = {0};
+label_pos_list labels = {0};
 
 uint8_t load8(argument src) {
 	ASSERT(src.size>=1);
@@ -90,18 +90,18 @@ void store(argument dst, uint64_t value) {
 	}
 }
 
-int labelpos(string identifier) {
+int find_label_pos(string identifier) {
 	for (int i = 0; i < labels.len; ++i) {
-		label l = labels.ptr[i];
+		label_pos l = labels.ptr[i];
 		if(string_eq(l.identifier, identifier)) return l.pos;
 	}
 	unreachable;
 }
 
-int resolve_builint(string id) {
+int find_builtin(string identifier) {
 	static_assert(builtin_count == 2, "This function needs updating");
-	if (string_eq(id, sv("print"))) return builtin_print;
-	else if (string_eq(id, sv("exit"))) return builtin_exit;
+	if (string_eq(identifier, sv("print"))) return builtin_print;
+	else if (string_eq(identifier, sv("exit"))) return builtin_exit;
 	return -1;
 }
 
@@ -129,8 +129,8 @@ void simulate(intermediate_representation ir) {
 	for (int i = 0; i < ir.instructions.len; ++i) {
 		instruction ins = ir.instructions.ptr[i];
 		if (ins.type == ins_label) {
-			array_append(&labels, ((label){ins.as.label, i}));
-			if (string_eq(ins.as.label, sv("main"))) pc = i;
+			array_append(&labels, ((label_pos){ins.as.label.name, i}));
+			if (string_eq(ins.as.label.name, sv("main"))) pc = i;
 		}
 	}
 
@@ -206,11 +206,11 @@ void simulate(intermediate_representation ir) {
 			}
 
 			regs[30] = (uint64_t)pc;
-			int fid = resolve_builint(ins.as.fcall.identifier);
+			int fid = find_builtin(ins.as.fcall.identifier);
 			if (fid != -1) {
 				execute_builtin(fid);
 			} else {
-				pc = labelpos(ins.as.fcall.identifier);
+				pc = find_label_pos(ins.as.fcall.identifier);
 			}
 			continue;
 		} break;
@@ -315,14 +315,14 @@ void simulate(intermediate_representation ir) {
 		} break;
 
 		case ins_jmp: {
-			pc = labelpos(ins.as.jmp.label);
+			pc = find_label_pos(ins.as.jmp.label.name);
 			continue;
 		} break;
 
 		case ins_jmp_ifnot: {
 				int cond = load(ins.as.jmpifnot.cond);
 				if (!cond) {
-					pc = labelpos(ins.as.jmpifnot.label);
+					pc = find_label_pos(ins.as.jmpifnot.label.name);
 					continue;
 				} 
 		} break;

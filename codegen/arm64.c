@@ -81,6 +81,14 @@ void store_arg(FILE* out, int reg, argument dst) {
 	default: unreachable;
 	}
 }
+ 
+string label_string(label l) {
+	if (l.is_func) {
+		return tsprintf("_"sfmt, sarg(l.name));
+	} else {
+		return tsprintf(".L"sfmt, sarg(l.name));
+	}
+}
 
 void load_addr(FILE* out, int reg, argument src) {
 	switch(src.type) {
@@ -159,7 +167,9 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		switch(ins.type){
 		case ins_label:
 			fprintf(out, "; ins_label\n");
-			fprintf(out, "_"sfmt":\n", sarg(ins.as.label));
+			if (ins.as.label.is_func)
+				fprintf(out, ".global "sfmt"\n", sarg(label_string(ins.as.label)));
+			fprintf(out, sfmt":\n", sarg(label_string(ins.as.label)));
 			break;
 
 		case ins_func_start:
@@ -174,7 +184,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			fprintf(out, "; ins_func_end\n");
 			fprintf(out, "   add sp, sp, #%zu\n", frame_size);
 			fprintf(out, "   ldp x29, x30, [sp], #16\n");
-			fprintf(out, "   ret\n");
+			fprintf(out, "   ret\n\n");
 			break;
 
 		case ins_func_call: 
@@ -207,7 +217,9 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 
 		case ins_ret:
 			fprintf(out, "; ins_ret\n");
-			load_arg(out, 0, ins.as.ret);
+			if (ins.as.ret.type != argument_type_none) {
+				load_arg(out, 0, ins.as.ret);
+			}
 			break;
 
 		case ins_binop: {
@@ -318,13 +330,13 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		} break;
 
 		case ins_jmp:
-			fprintf(out, "   b _"sfmt"\n", sarg(ins.as.jmp.label));
+			fprintf(out, "   b "sfmt"\n", sarg(label_string(ins.as.jmp.label)));
 			break;
 
 		case ins_jmp_ifnot:
 			load_arg(out, 0, ins.as.jmpifnot.cond); 
 			fprintf(out, "   cmp x0, #0\n");
-			fprintf(out, "   beq _"sfmt"\n", sarg(ins.as.jmpifnot.label));
+			fprintf(out, "   beq "sfmt"\n", sarg(label_string(ins.as.jmpifnot.label)));
 			break;
 
 		default: {
