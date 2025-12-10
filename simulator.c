@@ -129,8 +129,8 @@ void simulate(intermediate_representation ir) {
 	for (int i = 0; i < ir.instructions.len; ++i) {
 		instruction ins = ir.instructions.ptr[i];
 		if (ins.type == ins_label) {
-			array_append(&labels, ((label_pos){ins.as.label.name, i}));
-			if (string_eq(ins.as.label.name, sv("main"))) pc = i;
+			array_append(&labels, ((label_pos){ins.as.label, i}));
+			if (string_eq(ins.as.label, sv("main"))) pc = i;
 		}
 	}
 
@@ -315,14 +315,14 @@ void simulate(intermediate_representation ir) {
 		} break;
 
 		case ins_jmp: {
-			pc = find_label_pos(ins.as.jmp.label.name);
+			pc = find_label_pos(ins.as.jmp.label);
 			continue;
 		} break;
 
 		case ins_jmp_ifnot: {
 				int cond = load(ins.as.jmpifnot.cond);
 				if (!cond) {
-					pc = find_label_pos(ins.as.jmpifnot.label.name);
+					pc = find_label_pos(ins.as.jmpifnot.label);
 					continue;
 				} 
 		} break;

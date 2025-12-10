@@ -72,21 +72,16 @@ typedef struct {
 } frame;
 
 typedef struct {
-	string name;
-	bool is_func;
-} label;
-
-typedef struct {
 	instruction_type type;
 	lexer_file_loc loc;
 	union {
 		frame* frame;
 		argument ret;
-		label label;
+		string label;
 		struct {op_type type; argument dst, src1, src2;} op;
 		struct {argument dst; string identifier; int argc; argument* args;} fcall;
-		struct {label label;} jmp;
-		struct {argument cond; label label;} jmpifnot;
+		struct {string label;} jmp;
+		struct {argument cond; string label;} jmpifnot;
 	} as;
 } instruction;
 
@@ -262,24 +257,15 @@ int alignment_of_type(type* type) {
 	}
 }
 
-
-inline static label label_simple(string name) {
-	return (label){.name={.len=name.len, .ptr=strndup(name.ptr, name.len)}, .is_func=false};
-}
-
-inline static label label_func(string name) {
-	return (label){.name={.len=name.len, .ptr=strndup(name.ptr, name.len)}, .is_func=true};
-}
-
-inline static void add_instruction_label(label label) {
+inline static void add_instruction_label(string label) {
 	array_append(&instructions, ((instruction){.type=ins_label, .as = {.label=label}}));
 }
 
-inline static void add_instruction_jmp(label label) {
+inline static void add_instruction_jmp(string label) {
 	array_append(&instructions, ((instruction){.type=ins_jmp, .as = {.jmp={label=label}}}));
 }
 
-inline static void add_instruction_jmpifnot(argument cond, label label) {
+inline static void add_instruction_jmpifnot(argument cond, string label) {
 	array_append(&instructions, ((instruction){.type=ins_jmp_ifnot, .as = {.jmpifnot={.cond=cond, .label=label}}}));
 }
 
@@ -807,7 +793,7 @@ void compile_statement(frame* frame, statement stm) {
 			value = argument_none();
 		}
 		add_instruction_ret(value);
-		add_instruction_jmp(label_simple(current_func_name_end));
+		add_instruction_jmp(current_func_name_end);
 	} break;
 
 	case statement_type_if: {
@@ -819,8 +805,8 @@ void compile_statement(frame* frame, statement stm) {
 		}
 
 		static int if_counter = 0;
-		label else_label = label_simple(tsprintf("else%d", if_counter));
-		label end_label = label_simple(tsprintf("end%d", if_counter));
+		string else_label = tsprintf("else%d", if_counter);
+		string end_label = tsprintf("end%d", if_counter);
 		if_counter++;
 
 		// if only case
@@ -867,7 +853,7 @@ void compile_function(function func) {
 	}
 	symbol_add(symbol_type_function, func.identifier, type_of_function(func), 0);
 
-	add_instruction_label(label_func(func.identifier));
+	add_instruction_label(func.identifier);
 	frame* frame = calloc(1, sizeof(*frame));
 	frame->identifier = func.identifier;
 	add_instruction_func_start(frame);
@@ -888,7 +874,7 @@ void compile_function(function func) {
 	}
 	compile_statement_list(frame, func.body);
 	symbol_top = saved;
-	add_instruction_label(label_simple(current_func_name_end));
+	add_instruction_label(current_func_name_end);
 	add_instruction_func_end(frame);
 }
 

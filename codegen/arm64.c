@@ -50,8 +50,8 @@ void load_arg(FILE* out, int reg, argument src) {
 		break;
 
 	case argument_type_string:
-    	fprintf(out, "   adrp x%d, .S%d@PAGE\n", reg, src.as.index);
-		fprintf(out, "   add x%d, x%d, .S%d@PAGEOFF\n", reg, reg, src.as.index);
+    	fprintf(out, "   adrp x%d, .LC%d@PAGE\n", reg, src.as.index);
+		fprintf(out, "   add x%d, x%d, .LC%d@PAGEOFF\n", reg, reg, src.as.index);
 		break;
 
 	default: unreachable;
@@ -82,14 +82,6 @@ void store_arg(FILE* out, int reg, argument dst) {
 	}
 }
  
-string label_string(label l) {
-	if (l.is_func) {
-		return tsprintf("_"sfmt, sarg(l.name));
-	} else {
-		return tsprintf(".L"sfmt, sarg(l.name));
-	}
-}
-
 void load_addr(FILE* out, int reg, argument src) {
 	switch(src.type) {
 	case argument_type_local:
@@ -125,6 +117,17 @@ void load_param(FILE* out, argument src, argument dst) {
         fprintf(out, "    ldr %c0, [x29, #%d]\n", reg_size,  16 + slot*8);
         fprintf(out, "    str %c0, [x29, #-%d]\n",reg_size, dst.as.offset);
     }
+}
+
+
+bool func_start = true;
+
+string label_string(string l) {
+	if (func_start) {
+		return tsprintf("_"sfmt, sarg(l));
+	} else {
+		return tsprintf(".L"sfmt, sarg(l));
+	}
 }
 
 void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
@@ -167,8 +170,9 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		switch(ins.type){
 		case ins_label:
 			fprintf(out, "; ins_label\n");
-			if (ins.as.label.is_func)
-				fprintf(out, ".global "sfmt"\n", sarg(label_string(ins.as.label)));
+			if (func_start) {
+				fprintf(out, ".global _"sfmt"\n", sarg(ins.as.label));
+			}
 			fprintf(out, sfmt":\n", sarg(label_string(ins.as.label)));
 			break;
 
@@ -178,6 +182,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			fprintf(out, "   mov x29, sp\n");
 			frame_size = align(ins.as.frame->size, 16);
 			fprintf(out, "   sub sp, sp, #%zu\n", frame_size);
+			func_start = false;
 			break;
 
 		case ins_func_end:
@@ -185,6 +190,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			fprintf(out, "   add sp, sp, #%zu\n", frame_size);
 			fprintf(out, "   ldp x29, x30, [sp], #16\n");
 			fprintf(out, "   ret\n\n");
+			func_start = true;
 			break;
 
 		case ins_func_call: 
@@ -349,7 +355,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 	if (ir.string_literals.len > 0) {
 		fprintf(out, ".section __TEXT,__cstring,cstring_literals\n");
 		for (int i=0; i<ir.string_literals.len; i++) {
-			fprintf(out, ".S%d:\n", i);
+			fprintf(out, ".LC%d:\n", i);
 			fprintf(out, "  .string \""sfmt"\"\n", sarg(string_unescape(ir.string_literals.ptr[i])));
 		}
 	}

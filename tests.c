@@ -64,6 +64,13 @@ void test_compiler_003(void) {
     ASSERT(WIFEXITED(status));
     ASSERT(WEXITSTATUS(status) == 110);
 }
+
+void test_compiler_004(void) {
+	int status = system("./tinyc ./examples/004-if.tc && ./examples/004-if");
+    ASSERT(WIFEXITED(status));
+    ASSERT(WEXITSTATUS(status) == 10);
+}
+
 int main(void) {
 	test_type_parsing();
 	test_infix_expr_parsing();
@@ -72,6 +79,7 @@ int main(void) {
 	test_compiler_001();
 	test_compiler_002();
 	test_compiler_003();
+	test_compiler_004();
 
 	fprintf(stderr, "info: all test passed\n");
 }
