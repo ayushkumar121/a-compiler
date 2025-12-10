@@ -8,7 +8,7 @@ int error_count;
 #include "codegen.c"
 
 struct {
-	bool run;
+	bool build;
 } flags;
 
 int main(int argc, char** argv) {
@@ -22,8 +22,8 @@ int main(int argc, char** argv) {
 
 	string flag = flag = args_next(&args);
 	while(flag.len != 0) {
-		if (string_eq(flag, sv("--run")) || string_eq(flag, sv("-r"))) {
-			flags.run = true;
+		if (string_eq(flag, sv("--build")) || string_eq(flag, sv("-b"))) {
+			flags.build = true;
 		} else {
 			fprintf(stderr, "error: unknown command "sfmt"\n", sarg(flag));
 			exit(1);
@@ -43,10 +43,13 @@ int main(int argc, char** argv) {
 		fprintf(stderr, "error: %d errors occured during compilation\n", error_count);
 		exit(1);
 	}
-	codegen(ir, file_path, detect_host_machine());
-	if (flags.run) {
-		simulate(ir);
+
+	if (flags.build) {
+		codegen(ir, file_path, detect_host_machine());
 	}
+
+	// simulation is the default mode
+	simulate(ir);
 
 	return 0;
 }
