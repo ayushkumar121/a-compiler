@@ -156,13 +156,29 @@ symbol* symbol_lookup(string identifier, symbol_type symbol_type) {
 	return NULL;
 }
 
+// top = [1] -> [2] -> null
+// saved = [2] -> null
+void symbol_restore(symbol* saved) {
+	ASSERT(symbol_top != NULL);
+	symbol* s = symbol_top;
+	while(s != saved && s != NULL) {
+		symbol* next = s->next;
+		print(sv("freeing symbol"));
+		println(s->identifier);
+		type_free(s->type);
+		free(s);
+		s = next;
+	}
+	symbol_top = saved;
+}
+
 type resolve_complete_type(type type) {
 	switch (type.type) {
 	case type_primitive: return type;
 	case type_wrapped: {
 		*type.as.wrapped.inner = resolve_complete_type(*type.as.wrapped.inner);
 		return type;
-	} 
+	}
 	case type_array: {
 		*type.as.array.inner = resolve_complete_type(*type.as.array.inner);
 		return type;
@@ -735,7 +751,7 @@ void compile_statement(frame* frame, statement stm) {
 	case statement_type_list: {
 		symbol* saved = symbol_top;
 		compile_statement_list(frame, stm.as.list);
-		symbol_top = saved;
+		symbol_restore(saved);
 	} break;
 
 	case statement_type_decl: {
@@ -872,11 +888,10 @@ void compile_function(function func) {
 		int size = size_of_type(&decl_type);
 		argument dst = argument_allocate(frame, size);
 		add_instruction_op(op_load_param, dst, argument_param(i, size));
-
 		symbol_add(symbol_type_local, bind.identifier, decl_type, dst.as.offset);
 	}
 	compile_statement_list(frame, func.body);
-	symbol_top = saved;
+	symbol_restore(saved);
 	add_instruction_label(current_func_name_end);
 	add_instruction_func_end(frame);
 }
@@ -892,7 +907,7 @@ void compile_builtin(builtin b) {
 		array_append(&typ.as.function.arguments, type_of_primitive(primitive_string));
 		symbol_add(symbol_type_function, typ.as.function.identifier, typ, 0);
 	} break;
-	
+
 	case builtin_exit: {
 		type typ = {0};
 		typ.type = type_function;
@@ -917,10 +932,13 @@ intermediate_representation compile(program prg) {
 	for (int i=0; i<prg.structs.len; i++) {
 		compile_structure(prg.structs.ptr[i]);
 	}
+	structs_free(prg.structs);
 
 	for (int i=0; i<prg.functions.len; i++) {
 		compile_function(prg.functions.ptr[i]);
 	}
+	functions_free(prg.functions);
 
+	symbol_restore(NULL);
 	return (intermediate_representation){string_literals, instructions};
 }

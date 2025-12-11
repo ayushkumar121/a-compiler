@@ -532,6 +532,32 @@ type type_of_wrapped(wrapped_type_type wrapped_type, type* inner) {
 	return typ;
 }
 
+void type_free(type* t) {
+	ASSERT(t != NULL);
+	switch(t->type) {
+	case type_none:
+	case type_primitive:
+		break;
+	case type_wrapped:
+		type_free(t->as.wrapped.inner);
+		break;
+	case type_slice:
+		type_free(t->as.slice.inner);
+		break;
+	case type_array:
+		type_free(t->as.array.inner);
+		break;
+	case type_struct:
+		if (t->as.structure.field_count>0) type_free(t->as.structure.field_types);
+		break;
+	case type_function:
+		if (t->as.function.arguments.len>0) type_free(t->as.function.arguments.ptr);
+		type_free(t->as.function.return_type);
+		break;
+	}
+	free(t);
+}
+
 // Parsers
 
 bool token_not_empty_or_equals(lexer* lex, token_type typ) {
@@ -1186,6 +1212,21 @@ statement parse_statement(lexer* lex) {
 	return s;
 }
 
+void statements_free(statement_list stms) {
+	for (int i=0; i<stms.len; i++) {
+		switch(stms.ptr[i].type) {
+		case statement_type_list:
+			statements_free(stms.ptr[i].as.list);
+			break;
+		case statement_type_func_call:
+			free(stms.ptr[i].as.func_call.expressions.ptr);
+			break;
+		default: break;
+		}
+	}
+	free(stms.ptr);
+}
+
 structure parse_struct(lexer* lex) {
 	structure s = {0};
 	s.loc = lexer_current_loc(lex);
@@ -1222,6 +1263,10 @@ structure parse_struct(lexer* lex) {
 	}
 
 	return s;
+}
+
+void structs_free(structure_list structs) {
+	free(structs.ptr);
 }
 
 function parse_function(lexer* lex) {
@@ -1288,6 +1333,14 @@ function parse_function(lexer* lex) {
 	lexer_next_token(lex);
 
 	return func;
+}
+
+void functions_free(function_list funcs) {
+	for (int i=0; i<funcs.len; i++) {
+		free(funcs.ptr[i].arguments.ptr);
+		statements_free(funcs.ptr[i].body);
+	}
+	free(funcs.ptr);
 }
 
 program parse_program(lexer* lex) {
