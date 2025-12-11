@@ -183,8 +183,9 @@ type resolve_complete_type(type type) {
 		if (!symbl) return type_error;
 		return *symbl->type;
 	}
-	case type_none: unreachable;
+	case type_none: unreachable();
 	}
+	unreachable();
 }
 
 int alignment_of_type(type* type);
@@ -205,7 +206,7 @@ int size_of_type(type* type) {
 		case primitive_float: return 4;
 		case primitive_double: return 8;
 		case primitive_string: return 2*PTR_SIZE;
-		case primitive_none: unreachable;
+		case primitive_none: unreachable();
 		}
 	}
 	case type_wrapped: {
@@ -339,13 +340,13 @@ argument argument_from_symbol(symbol* symbl) {
 	return (argument){.type=argument_type_local, .size=size, .as={.offset=symbl->offset}};
 	else if (symbl->symbol_type == symbol_type_global)
 	return (argument){.type=argument_type_global, .size=size, .as={.offset=symbl->offset}};
-	else unreachable;
+	else unreachable();
 }
 
 argument argument_field(argument base, int offset, int size) {
 	if (base.type == argument_type_local) base.as.offset -= offset;
 	else if (base.type == argument_type_global) base.as.offset += offset;
-	else unreachable;
+	else unreachable();
 	base.size = size;
 	return base;
 }
@@ -379,8 +380,9 @@ bool type_eq(type* a, type* b) {
 	case type_slice: return type_eq(a->as.slice.inner, b->as.slice.inner);
 	case type_array: return a->as.array.size == b->as.array.size && type_eq(a->as.array.inner, b->as.array.inner);
 	case type_function: return string_eq(a->as.function.identifier, b->as.function.identifier);
-	case type_none: unreachable;
+	case type_none: unreachable();
 	}
+	unreachable();
 }
 
 type type_of_expression(expression expr) {
@@ -412,7 +414,7 @@ type type_of_expression(expression expr) {
 				memcpy(inner, &tmp, sizeof(type));
 				return type_of_wrapped(wrapped_type_pointer, inner);
 			}
-			default: unreachable;
+			default: unreachable();
 			}
 		} else if (expr.as.tree.operands.len == 2) {
 			switch(expr.as.tree.op) {
@@ -427,13 +429,13 @@ type type_of_expression(expression expr) {
 					return *base_type.as.array.inner;
 				} else if (base_type.type == type_primitive && base_type.as.primitive == primitive_string) {
 					return type_of_primitive(primitive_byte);
-				} else unreachable;
+				} else unreachable();
 			}
-			default: unreachable;
+			default: unreachable();
 			}
-		} else unreachable;
+		} else unreachable();
 	}
-	default: unreachable;
+	default: unreachable();
 	}
 }
 
@@ -536,7 +538,7 @@ argument compile_binop(frame* frame, expression_tree expr_tree) {
 		case operator_minus: op = op_sub; break;
 		case operator_star: op = op_mul; break;
 		case operator_slash: op = op_div; break;
-		default: unreachable;
+		default: unreachable();
 		}
 
 		argument src1 = compile_expression(frame, expr_tree.operands.ptr[0]);
@@ -559,7 +561,7 @@ argument compile_uniop(frame* frame, expression_tree expr_tree) {
 		if (src.type == argument_type_none) return argument_none();
 		add_instruction_op(op_addrof, dst, src);
 		return dst;
-	} else unreachable;
+	} else unreachable();
 }
 
 argument compile_fcall(frame* frame, func_call fcall) {
@@ -620,10 +622,11 @@ argument compile_expression(frame* frame, expression expr) {
 			return compile_uniop(frame, expr.as.tree);
 		} else if (expr.as.tree.operands.len == 2) {
 			return compile_binop(frame, expr.as.tree);
-		} else unreachable;
+		} else unreachable();
 	}
 	case expression_type_none: return argument_none();
 	}
+	unreachable();
 }
 
 void compile_statement(frame* frame, statement stm);
@@ -722,7 +725,7 @@ void compile_assignment(frame* frame, statement_assign assignment) {
 			add_instruction_op2(op_copy, dst, src, argument_literal(dst.size));
 	} break;
 
-	default: unreachable;
+	default: unreachable();
 	}
 }
 
@@ -827,7 +830,7 @@ void compile_statement(frame* frame, statement stm) {
 		(void)compile_fcall(frame, stm.as.func_call);
 	} break;
 
-	default: unreachable;
+	default: unreachable();
 	}
 }
 
@@ -918,5 +921,6 @@ intermediate_representation compile(program prg) {
 	for (int i=0; i<prg.functions.len; i++) {
 		compile_function(prg.functions.ptr[i]);
 	}
+
 	return (intermediate_representation){string_literals, instructions};
 }

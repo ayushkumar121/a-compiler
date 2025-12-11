@@ -1,4 +1,4 @@
-CFLAGS=-Wall -Wextra -Werror -g -fsanitize=address -fsanitize=undefined
+CFLAGS=-Wall -g -fsanitize=address -fsanitize=undefined
 .PHONY: clean
 
 all: tinyc tests

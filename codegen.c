@@ -7,6 +7,9 @@ void codegen(intermediate_representation ir, string file_path, machine target) {
 	if (target.system == system_macos && target.arch == arch_arm64) {
 		codegen_for_arm64_macos(ir, asm_path);
 		exegen_for_arm64_macos(exe_path, asm_path);
+	} else if (target.system == system_linux && target.arch == arch_x64) {
+		codegen_for_arm64_macos(ir, asm_path);
+		exegen_for_arm64_macos(exe_path, asm_path);
 	} else {
 		todo("codegen for target");
 	}

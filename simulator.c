@@ -32,7 +32,7 @@ uint8_t load8(argument src) {
 	case argument_type_local: return *(uint8_t*)((uint8_t*)(uintptr_t)regs[29] - src.as.offset); 
 	case argument_type_global: return *(uint8_t*)(globals + src.as.offset); 
 	case argument_type_literal: return src.as.value; 
-	default: unreachable; 
+	default: unreachable(); 
 	} 
 }
 
@@ -42,7 +42,7 @@ uint32_t load32(argument src) {
     case argument_type_local: return *(uint32_t*)((uint8_t*)(uintptr_t)regs[29] - src.as.offset); 
     case argument_type_global: return *(uint32_t*)(globals + src.as.offset);
     case argument_type_literal: return src.as.value; 
-    default: unreachable; 
+    default: unreachable(); 
     } 
 }
 
@@ -54,7 +54,7 @@ uint64_t load64(argument src) {
 	case argument_type_global: return *(uint64_t*)(globals + src.as.offset); 
 	case argument_type_literal: return src.as.value; 
 	case argument_type_string: return (uint64_t)string_literals.ptr[src.as.index].ptr; 
-	default: unreachable; 
+	default: unreachable(); 
 	} 
 }
 
@@ -62,7 +62,7 @@ void* argument_location(argument dst) {
     switch(dst.type) {
     case argument_type_local: return (uint8_t*)(uintptr_t)regs[29] - dst.as.offset;
     case argument_type_global: return globals + dst.as.offset;
-    default: unreachable;
+    default: unreachable();
     }
 }
 
@@ -71,7 +71,7 @@ uint64_t load(argument src) {
 	case 1: return load8(src);
 	case 4: return load32(src);
 	case 8: return load64(src);
-	default: unreachable;
+	default: unreachable();
 	}
 }
 
@@ -85,7 +85,7 @@ void store(argument dst, uint64_t value) {
 		case 1: *(uint8_t*)dst_ptr = (uint8_t)value; break;
 		case 4: *(uint32_t*)dst_ptr = (uint32_t)value; break;
 		case 8: *(uint64_t*)dst_ptr = (uint64_t)value; break;
-		default: unreachable;
+		default: unreachable();
 		}
 	}
 }
@@ -95,7 +95,7 @@ int find_label_pos(string identifier) {
 		label_pos l = labels.ptr[i];
 		if(string_eq(l.identifier, identifier)) return l.pos;
 	}
-	unreachable;
+	unreachable();
 }
 
 int find_builtin(string identifier) {
@@ -113,7 +113,7 @@ void execute_builtin(builtin id) {
 		case builtin_exit: {
 			exit(regs[0]);
 		} break;
-		case builtin_count: unreachable;
+		case builtin_count: unreachable();
 	}
 
 	regs[0] = 0;
@@ -260,7 +260,7 @@ void simulate(intermediate_representation ir) {
 						// TODO: find actual field size
 						store(argument_field(ins.as.op.dst, 0, PTR_SIZE), regs[idx]);
 						store(argument_field(ins.as.op.dst, PTR_SIZE, PTR_SIZE), regs[idx+1]);
-					} else unreachable;
+					} else unreachable();
 			    } else {
 			        uint64_t* fp_words = (uint64_t*)(uintptr_t)regs[29];
 			        store(ins.as.op.dst, fp_words[idx - 8]);
@@ -278,7 +278,7 @@ void simulate(intermediate_representation ir) {
 				case 1: *(uint8_t*)dst = *(uint8_t*)src; break;
 				case 4: *(uint32_t*)dst = *(uint32_t*)src; break;
 				case 8: *(uint64_t*)dst = *(uint64_t*)src; break;
-				default: unreachable;
+				default: unreachable();
 				}
 			} break;
 
@@ -293,7 +293,7 @@ void simulate(intermediate_representation ir) {
 				case 1: *(uint8_t*)dst = value; break;
 				case 4: *(uint32_t*)dst = value; break;
 				case 8: *(uint64_t*)dst = value; break;
-				default: unreachable;
+				default: unreachable();
 				}
 			} break;
 
@@ -304,7 +304,7 @@ void simulate(intermediate_representation ir) {
 
 			default:
 				printf("unimplemented op: %d\n", ins.as.op.type);
-				unreachable;
+				unreachable();
 			}
 		} break;
 
@@ -329,10 +329,10 @@ void simulate(intermediate_representation ir) {
 
 		default: 
 			printf("unimplemented ins: %d\n", ins.type);
-			unreachable
+			unreachable();
 		}
 
 		pc++;
 	}
-	fprintf(stderr, "info: exitcode: %llu\n", regs[0]);
+	fprintf(stderr, "info: exitcode: %d\n", (int)regs[0]);
 }

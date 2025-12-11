@@ -54,7 +54,7 @@ void load_arg(FILE* out, int reg, argument src) {
 		fprintf(out, "   add x%d, x%d, .LC%d@PAGEOFF\n", reg, reg, src.as.index);
 		break;
 
-	default: unreachable;
+	default: unreachable();
 	}
 }
 
@@ -78,7 +78,7 @@ void store_arg(FILE* out, int reg, argument dst) {
 		fprintf(out, "   str %c%d, [x9, #%d]\n", reg_size, reg, dst.as.offset);
 		break;
 		
-	default: unreachable;
+	default: unreachable();
 	}
 }
  
@@ -94,7 +94,7 @@ void load_addr(FILE* out, int reg, argument src) {
 		fprintf(out, "   add x%d, x0, #%d\n", reg, src.as.offset);
 		break;
 
-	default: unreachable;
+	default: unreachable();
 	}
 }
 
@@ -111,7 +111,7 @@ void load_param(FILE* out, argument src, argument dst) {
 			// TODO: find actual field size
     		store_arg(out, src.as.index, argument_field(dst, 0, PTR_SIZE));
     		store_arg(out, src.as.index+1, argument_field(dst, PTR_SIZE, PTR_SIZE));
-    	} else unreachable;
+    	} else unreachable();
     } else {
         int slot = index - 8;
         fprintf(out, "    ldr %c0, [x29, #%d]\n", reg_size,  16 + slot*8);
@@ -330,7 +330,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 
 			default:{
 				printf("unimplemented op %d\n", ins.as.op.type);
-				unreachable;
+				unreachable();
 			}
 			}
 		} break;
@@ -347,7 +347,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 
 		default: {
 			printf("unimplemented ins %d\n", ins.type);
-			unreachable;
+			unreachable();
 		}
 		}
 	}

@@ -364,6 +364,7 @@ string keyword_to_string(keyword kw) {
     case keyword_import: return sv("import");
     case keyword_nil: return sv("nil");
     }
+    unreachable();
 }
 
 string primitive_to_string(primitive_type primitive) {
@@ -382,6 +383,7 @@ string primitive_to_string(primitive_type primitive) {
 	case primitive_double: return sv("double");
 	case primitive_string: return sv("string");
 	}
+	unreachable();
 }
 
 string wrapped_to_string(wrapped_type_type typ) {
@@ -391,6 +393,7 @@ string wrapped_to_string(wrapped_type_type typ) {
 	case wrapped_type_optional: return sv("?");
 	case wrapped_type_result: return sv("!");
 	}
+	unreachable();
 }
 
 string type_to_string(type typ) {
@@ -430,6 +433,7 @@ string type_to_string(type typ) {
 		return s;
 	}
 	}
+	unreachable();
 }
 
 string operator_to_string(operator op) {
@@ -445,6 +449,7 @@ string operator_to_string(operator op) {
 	case operator_exclaimation: return sv("!");
 	case operator_index: return sv("[]");
 	}
+	unreachable();
 }
 
 string expression_to_string(expression expr) {
@@ -454,7 +459,7 @@ string expression_to_string(expression expr) {
 		switch(expr.as.literal.type) {
 		case expression_literal_string: return expr.as.literal.as.string;
 		case expression_literal_char: return tsprintf("%c", expr.as.literal.as.character);
-		case expression_literal_integer: return tsprintf("%lld", expr.as.literal.as.integer);
+		case expression_literal_integer: return tsprintf("%ld", expr.as.literal.as.integer);
 		}
 	}
 	case expression_type_func_call: {
@@ -480,6 +485,7 @@ string expression_to_string(expression expr) {
 		return s;
 	}
 	}
+	unreachable();
 }
 
 // type helpers
@@ -679,7 +685,7 @@ binding_power infix_binding_power(operator op) {
 	case operator_star:
 	case operator_slash: return (binding_power){3, 4};
 	case operator_dot: return (binding_power){10, 9};
-	default: unreachable;
+	default: unreachable();
 	}
 }
 
@@ -690,7 +696,7 @@ binding_power prefix_binding_power(operator op) {
 	case operator_minus: return (binding_power){0, 5};
 	case operator_ampersand:
 	case operator_star: return (binding_power){0, 6};
-	default: unreachable;
+	default: unreachable();
 	}
 }
 
@@ -700,7 +706,7 @@ binding_power postfix_binding_power(operator op) {
 	case operator_index:
 	case operator_question:
 	case operator_exclaimation: return (binding_power){8, 0};
-	default: unreachable;
+	default: unreachable();
 	}
 }
 

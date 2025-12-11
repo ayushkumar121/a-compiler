@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -25,8 +26,10 @@
         } \
     } while (0)
 
-#define unreachable ASSERT(false && "unreachable");
-#define todo(message) ASSERT(false && "TODO:" message);
+#ifndef unreachable
+	#define unreachable() ASSERT(false && "unreachable")
+#endif
+#define todo(message) ASSERT(false && "TODO:" message)
 
 typedef struct {
   int len;
