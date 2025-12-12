@@ -36,6 +36,7 @@ int main(int argc, char** argv) {
 		exit(1);
 	}
 
+	machine target = detect_host_machine();
 	lexer lex = lexer_from_file(file_path);
 	program prg = parse_program(&lex);
 	intermediate_representation ir = compile(prg);
@@ -45,7 +46,7 @@ int main(int argc, char** argv) {
 	}
 
 	if (flags.build) {
-		codegen(ir, file_path, detect_host_machine());
+		codegen(ir, file_path, target);
 	}
 
 	// simulation is the default mode

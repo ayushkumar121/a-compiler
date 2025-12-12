@@ -37,11 +37,11 @@ typedef enum {
 } op_type;
 
 typedef enum {
-	R0,
-	R1,
-	R2,
-	R3,
-	R_Count
+	VR0,
+	VR1,
+	VR2,
+	VR3,
+	vreg_count
 } virtual_register;
 
 typedef enum {
@@ -163,8 +163,6 @@ void symbol_restore(symbol* saved) {
 	symbol* s = symbol_top;
 	while(s != saved && s != NULL) {
 		symbol* next = s->next;
-		print(sv("freeing symbol"));
-		println(s->identifier);
 		type_free(s->type);
 		free(s);
 		s = next;
@@ -488,7 +486,7 @@ argument compile_binop(frame* frame, expression_tree expr_tree) {
 			if (!index.type) return argument_none();
 
 			argument dst = argument_allocate(frame, elemsize);
-			argument t0 = argument_register(R0);
+			argument t0 = argument_register(VR0);
 			add_instruction_op(op_addrof, t0, base);
 			add_instruction_op2(op_madd, t0, index, argument_literal(elemsize));
 			add_instruction_op2(op_load_indirect, dst, t0, argument_literal(elemsize));
@@ -499,7 +497,7 @@ argument compile_binop(frame* frame, expression_tree expr_tree) {
 			argument index = compile_expression(frame, expr_tree.operands.ptr[1]);
 			if (!index.type) return argument_none();
 
-			argument t0 = argument_register(R0);
+			argument t0 = argument_register(VR0);
 			add_instruction_op(op_store, t0, data);
 			add_instruction_op2(op_add, t0, t0, index);
 				
@@ -700,14 +698,14 @@ void compile_assignment(frame* frame, statement_assign assignment) {
 		argument value = compile_expression(frame, assignment.value);
 		if (value.type == argument_type_none) return;
 
-		argument t0 = argument_register(R0);
+		argument t0 = argument_register(VR0);
 		add_instruction_op(op_addrof, t0, base);
 		add_instruction_op2(op_madd, t0, index, argument_literal(elemsize));
 
 		if (elemsize <= PTR_SIZE)
 			add_instruction_op2(op_store_indirect, t0, value, argument_literal(elemsize));
 		else {
-			argument t1 = argument_register(R1);
+			argument t1 = argument_register(VR1);
 			add_instruction_op(op_addrof, t1, value);
 			add_instruction_op2(op_copy, t0, t1, argument_literal(elemsize));
 		}
@@ -939,6 +937,6 @@ intermediate_representation compile(program prg) {
 	}
 	functions_free(prg.functions);
 
-	symbol_restore(NULL);
+	//symbol_restore(NULL);
 	return (intermediate_representation){string_literals, instructions};
 }

@@ -1,12 +1,17 @@
-int vreg_mapping[R_Count] = {
-	[R0] = 9, //x4
-	[R1] = 10, //x5
-	[R2] = 11, //x6
-	[R3] = 12, //x7
+typedef enum {
+	X0, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, arm64_register_count
+} arm64_register;
+
+arm64_register arm64_vreg_mapping[vreg_count] = {
+	[VR0] = X9,
+	[VR1] = X10,
+	[VR2] = X11,
+	[VR3] = X12,
 };
 
 void load_immediate(FILE* out, int reg, size_t size, size_t value) {
 	char reg_size = size <= 4 ? 'w' : 'x';
+
 
 	if (value <= 0xFFFF) {
     	fprintf(out, "   movz %c%d, #%zu\n", reg_size, reg, value);
@@ -24,7 +29,7 @@ void load_immediate(FILE* out, int reg, size_t size, size_t value) {
 	}
 }
 
-void load_arg(FILE* out, int reg, argument src) {
+void arm64_load(FILE* out, int reg, argument src) {
 	ASSERT(src.size > 0);
 	ASSERT(src.size <= PTR_SIZE);
 	char reg_size = src.size <= 4 ? 'w' : 'x';
@@ -35,8 +40,8 @@ void load_arg(FILE* out, int reg, argument src) {
 		break;
 
 	case argument_type_vreg:
-		ASSERT(reg != vreg_mapping[src.as.vreg]);
-    	fprintf(out, "   mov %c%d, %c%d\n", reg_size, reg, reg_size, vreg_mapping[src.as.vreg]);
+		ASSERT(reg != arm64_vreg_mapping[src.as.vreg]);
+    	fprintf(out, "   mov %c%d, %c%d\n", reg_size, reg, reg_size, arm64_vreg_mapping[src.as.vreg]);
 		break;
 
 	case argument_type_local:
@@ -59,13 +64,12 @@ void load_arg(FILE* out, int reg, argument src) {
 }
 
 void store_arg(FILE* out, int reg, argument dst) {
-	if (dst.size == 0) return;
 	ASSERT(dst.size <= PTR_SIZE);
 	char reg_size = dst.size <= 4? 'w':'x';
 	switch(dst.type) {
 	case argument_type_vreg:
-		ASSERT(reg != vreg_mapping[dst.as.vreg]);
-    	fprintf(out, "   mov %c%d, %c%d\n", reg_size, vreg_mapping[dst.as.vreg], reg_size, reg);
+		ASSERT(reg != arm64_vreg_mapping[dst.as.vreg]);
+    	fprintf(out, "   mov %c%d, %c%d\n", reg_size, arm64_vreg_mapping[dst.as.vreg], reg_size, reg);
 		break;
 
 	case argument_type_local:
@@ -77,11 +81,11 @@ void store_arg(FILE* out, int reg, argument dst) {
 		fprintf(out, "   add x9, x9, _globals@PAGEOFF\n");
 		fprintf(out, "   str %c%d, [x9, #%d]\n", reg_size, reg, dst.as.offset);
 		break;
-		
+
 	default: unreachable();
 	}
 }
- 
+
 void load_addr(FILE* out, int reg, argument src) {
 	switch(src.type) {
 	case argument_type_local:
@@ -98,7 +102,7 @@ void load_addr(FILE* out, int reg, argument src) {
 	}
 }
 
-void load_param(FILE* out, argument src, argument dst) {	
+void load_param(FILE* out, argument src, argument dst) {
 	ASSERT(dst.type == argument_type_local);
 	ASSERT(src.type == argument_type_param);
 
@@ -119,14 +123,11 @@ void load_param(FILE* out, argument src, argument dst) {
     }
 }
 
-
-bool func_start = true;
-
-string label_string(string l) {
-	if (func_start) {
+string arm64_macos_label(string l) {
+	if (!inside_function) {
 		return tsprintf("_"sfmt, sarg(l));
 	} else {
-		return tsprintf(".L"sfmt, sarg(l));
+		return tsprintf("."sfmt, sarg(l));
 	}
 }
 
@@ -142,7 +143,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 
 	for (int i = 0; i <builtin_count; ++i){
 		switch(i) {
-		case builtin_print: 
+		case builtin_print:
 			fprintf(out, "_print:\n");
 			fprintf(out, "   mov x2, x0\n");
 			fprintf(out, "   mov x0, #1\n"); // SYS_OUT
@@ -161,8 +162,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		case builtin_count: break;
 		}
 	}
-
-	fprintf(out, "\n\n");
+	fprintf(out, "\n");
 
 	size_t frame_size;
 	for (int i=0; i<ir.instructions.len; i++) {
@@ -170,10 +170,8 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		switch(ins.type){
 		case ins_label:
 			fprintf(out, "; ins_label\n");
-			if (func_start) {
-				fprintf(out, ".global _"sfmt"\n", sarg(ins.as.label));
-			}
-			fprintf(out, sfmt":\n", sarg(label_string(ins.as.label)));
+			if (!inside_function) fprintf(out, ".global _"sfmt"\n", sarg(ins.as.label));
+			fprintf(out, sfmt":\n", sarg(arm64_macos_label(ins.as.label)));
 			break;
 
 		case ins_func_start:
@@ -182,7 +180,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			fprintf(out, "   mov x29, sp\n");
 			frame_size = align(ins.as.frame->size, 16);
 			fprintf(out, "   sub sp, sp, #%zu\n", frame_size);
-			func_start = false;
+			inside_function = true;
 			break;
 
 		case ins_func_end:
@@ -190,41 +188,46 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			fprintf(out, "   add sp, sp, #%zu\n", frame_size);
 			fprintf(out, "   ldp x29, x30, [sp], #16\n");
 			fprintf(out, "   ret\n\n");
-			func_start = true;
+			inside_function = false;
 			break;
 
-		case ins_func_call: 
+		case ins_func_call:
 			fprintf(out, "; ins_func_call\n");
-			int reg = 0;
+			int slot_index = 0;
 			for (int i = 0; i < ins.as.fcall.argc; ++i) {
-				if (i < 8) {
-					if (ins.as.fcall.args[i].size <= PTR_SIZE) {
-						load_arg(out, reg++, ins.as.fcall.args[i]);
-					} else if (ins.as.fcall.args[i].size <= 2*PTR_SIZE) {
+				argument arg = ins.as.fcall.args[i];
+				if (slot_index < 8) {
+					if (arg.size <= 8) {
+						arm64_load(out, slot_index++, arg);
+					} else if (arg.size <= 16) {
 						// TODO: find actual field size
-						load_arg(out, reg++, argument_field(ins.as.fcall.args[i], 0, PTR_SIZE));
-						load_arg(out, reg++, argument_field(ins.as.fcall.args[i], PTR_SIZE, PTR_SIZE));
+						arm64_load
+		(out, slot_index++, argument_field(arg, 0, PTR_SIZE));
+						arm64_load
+		(out, slot_index++, argument_field(arg, PTR_SIZE, PTR_SIZE));
 					} else {
-						load_addr(out, reg++, ins.as.fcall.args[i]);
+						load_addr(out, slot_index++, arg);
 					}
 		        } else {
 		            int slot = i - 8;
 		            int offset = 16 + slot * 8;
-		            if (ins.as.fcall.args[i].size <= PTR_SIZE)
-		            	load_arg(out, 0, ins.as.fcall.args[i]);
+		            if (arg.size <= PTR_SIZE)
+		            	arm64_load
+		        (out, 0, arg);
 		            else
-		            	load_addr(out, 0, ins.as.fcall.args[i]);
+		            	load_addr(out, 0, arg);
 		            fprintf(out, "   str x0, [x29, #-%d]\n", offset);
 		        }
 			}
 			fprintf(out, "   bl _"sfmt"\n", sarg(ins.as.fcall.identifier));
-			store_arg(out, 0, ins.as.fcall.dst);
+			if (ins.as.fcall.dst.size > 0) store_arg(out, 0, ins.as.fcall.dst);
 			break;
 
 		case ins_ret:
 			fprintf(out, "; ins_ret\n");
 			if (ins.as.ret.type != argument_type_none) {
-				load_arg(out, 0, ins.as.ret);
+				arm64_load
+(out, 0, ins.as.ret);
 			}
 			break;
 
@@ -232,41 +235,52 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			switch(ins.as.op.type) {
 			case op_add:
 				fprintf(out, "; op_add\n");
-				load_arg(out, 0, ins.as.op.src1);
-				load_arg(out, 1, ins.as.op.src2);
+				arm64_load
+(out, 0, ins.as.op.src1);
+				arm64_load
+(out, 1, ins.as.op.src2);
 				fprintf(out, "   add x0, x0, x1\n");
 				store_arg(out, 0, ins.as.op.dst);
 				break;
 
 			case op_sub:
 				fprintf(out, "; op_sub\n");
-				load_arg(out, 0, ins.as.op.src1);
-				load_arg(out, 1, ins.as.op.src2);
+				arm64_load
+(out, 0, ins.as.op.src1);
+				arm64_load
+(out, 1, ins.as.op.src2);
 				fprintf(out, "   sub x0, x0, x1\n");
 				store_arg(out, 0, ins.as.op.dst);
 				break;
 
 			case op_mul:
 				fprintf(out, "; op_mul\n");
-				load_arg(out, 0, ins.as.op.src1);
-				load_arg(out, 1, ins.as.op.src2);
+				arm64_load
+(out, 0, ins.as.op.src1);
+				arm64_load
+(out, 1, ins.as.op.src2);
 				fprintf(out, "   mul x0, x0, x1\n");
 				store_arg(out, 0, ins.as.op.dst);
 				break;
 
 			case op_div:
 				fprintf(out, "; op_mul\n");
-				load_arg(out, 0, ins.as.op.src1);
-				load_arg(out, 1, ins.as.op.src2);
+				arm64_load
+(out, 0, ins.as.op.src1);
+				arm64_load
+(out, 1, ins.as.op.src2);
 				fprintf(out, "   sdiv x0, x0, x1\n");
 				store_arg(out, 0, ins.as.op.dst);
 				break;
 
 			case op_madd:
 				fprintf(out, "; op_madd\n");
-			    load_arg(out, 0, ins.as.op.dst);
-			    load_arg(out, 1, ins.as.op.src1);
-			    load_arg(out, 2, ins.as.op.src2);
+			    arm64_load
+			(out, 0, ins.as.op.dst);
+			    arm64_load
+			(out, 1, ins.as.op.src1);
+			    arm64_load
+			(out, 2, ins.as.op.src2);
 			    fprintf(out, "   madd x0, x1, x2, x0\n");
 			    store_arg(out, 0, ins.as.op.dst);
 				break;
@@ -288,14 +302,16 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 				ASSERT(ins.as.op.dst.size <= PTR_SIZE);
 				ASSERT(ins.as.op.src2.type != argument_type_none);
 
-				load_arg(out, 0, ins.as.op.src1);
+				arm64_load
+(out, 0, ins.as.op.src1);
 			    fprintf(out, "   ldr %c0, [x0]\n", ins.as.op.dst.size <= 4 ? 'w' : 'x');
 				store_arg(out, 0, ins.as.op.dst);
 				break;
 
 			case op_store:
 				fprintf(out, "; op_store\n");
-				load_arg(out, 0, ins.as.op.src1);
+				arm64_load
+(out, 0, ins.as.op.src1);
 				store_arg(out, 0, ins.as.op.dst);
 				break;
 
@@ -304,8 +320,10 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 				ASSERT(ins.as.op.dst.size <= PTR_SIZE);
 				ASSERT(ins.as.op.src2.type != argument_type_none);
 
-				load_arg(out, 0, ins.as.op.src1);
-    			load_arg(out, 1, ins.as.op.dst);
+				arm64_load
+(out, 0, ins.as.op.src1);
+    			arm64_load
+   (out, 1, ins.as.op.dst);
 
 				fprintf(out, "   str %c0, [x1]\n", ins.as.op.src1.size <= 4 ? 'w' : 'x');
 				break;
@@ -313,9 +331,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			case op_copy:
 			    fprintf(out, "; op_copy\n");
 			    ASSERT(ins.as.op.src2.type == argument_type_literal);
-			    
 			    int size = ins.as.op.src2.as.value;
-			    
 			    load_addr(out, 0, ins.as.op.src1);  // src address -> x0
 			    load_addr(out, 1, ins.as.op.dst);   // dst address -> x1
 			    load_immediate(out, 2, 8, size);     // size -> x2
@@ -336,13 +352,13 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		} break;
 
 		case ins_jmp:
-			fprintf(out, "   b "sfmt"\n", sarg(label_string(ins.as.jmp.label)));
+			fprintf(out, "   b "sfmt"\n", sarg(arm64_macos_label(ins.as.jmp.label)));
 			break;
 
 		case ins_jmp_ifnot:
-			load_arg(out, 0, ins.as.jmpifnot.cond); 
+			arm64_load(out, 0, ins.as.jmpifnot.cond);
 			fprintf(out, "   cmp x0, #0\n");
-			fprintf(out, "   beq "sfmt"\n", sarg(label_string(ins.as.jmpifnot.label)));
+			fprintf(out, "   beq "sfmt"\n", sarg(arm64_macos_label(ins.as.jmpifnot.label)));
 			break;
 
 		default: {
@@ -366,9 +382,9 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 void exegen_for_arm64_macos(string exe_path, string asm_path) {
 	fprintf(stderr, "info: generating "sfmt"\n", sarg(exe_path));
 
-	cmd(tsprintf("as -o %.*s.o %.*s", 
+	cmd(tsprintf("as -o %.*s.o %.*s",
 		sarg(exe_path), sarg(asm_path)));
 
-	cmd(tsprintf("ld -o %.*s %.*s.o -lSystem -syslibroot `xcrun --show-sdk-path` -e _start", 
+	cmd(tsprintf("ld -o %.*s %.*s.o -lSystem -syslibroot `xcrun --show-sdk-path` -e _start",
 		sarg(exe_path), sarg(exe_path)));
 }

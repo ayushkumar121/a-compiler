@@ -76,7 +76,7 @@ uint64_t load(argument src) {
 }
 
 void store(argument dst, uint64_t value) {
-	if (dst.size == 0) return;
+	ASSERT(dst.size > 0);
 	if (dst.type == argument_type_vreg) {
 		regs[dst.as.vreg] = value;
 	} else {
@@ -178,21 +178,22 @@ void simulate(intermediate_representation ir) {
 
 		case ins_func_call: {
 			if (regs[30] == (uint64_t)pc) {
-		        store(ins.as.fcall.dst, regs[0]);
+				if (ins.as.fcall.dst.size > 0)
+			        store(ins.as.fcall.dst, regs[0]);
 		        regs[30] = INVALID_RET;
-		        break; 
+		        break;
     		}
-    		int reg = 0;
+    		int slot_index = 0;
 			for (int i = 0; i < ins.as.fcall.argc; ++i) {
-				if (i < 8) {
-					if (ins.as.fcall.args[i].size <= PTR_SIZE) {
-						regs[reg++] = load(ins.as.fcall.args[i]);
-					} else if (ins.as.fcall.args[i].size <= 2*PTR_SIZE) {
+				if (slot_index < 8) {
+					if (ins.as.fcall.args[i].size <= 8) {
+						regs[slot_index++] = load(ins.as.fcall.args[i]);
+					} else if (ins.as.fcall.args[i].size <= 16) {
 						// TODO: find actual field size
-						regs[reg++] = load(argument_field(ins.as.fcall.args[i], 0, PTR_SIZE));
-						regs[reg++] = load(argument_field(ins.as.fcall.args[i], PTR_SIZE, PTR_SIZE));
+						regs[slot_index++] = load(argument_field(ins.as.fcall.args[i], 0, PTR_SIZE));
+						regs[slot_index++] = load(argument_field(ins.as.fcall.args[i], PTR_SIZE, PTR_SIZE));
 					} else {
-						regs[reg++] = (uintptr_t)argument_location(ins.as.fcall.args[i]);
+						regs[slot_index++] = (uintptr_t)argument_location(ins.as.fcall.args[i]);
 					}
 		        } else {
 					uint64_t value;

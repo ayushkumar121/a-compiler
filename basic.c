@@ -532,9 +532,27 @@ machine detect_host_machine(void) {
   return m;
 }
 
+string machine_to_string(machine m) {
+	string s = sv("");
+	switch(m.system) {
+	case system_linux: s = tconcat(s, sv("linux")); break;
+	case system_macos: s = tconcat(s, sv("macos")); break;
+	case system_windows: s = tconcat(s, sv("windows")); break;
+	case system_unknown: s = tconcat(s, sv("unknown")); break;
+	}
+	s = tconcat(s, sv("-"));
+	switch(m.arch) {
+	case arch_arm64: s = tconcat(s, sv("arm64")); break;
+	case arch_x64: s = tconcat(s, sv("x64")); break;
+	case arch_x86: s = tconcat(s, sv("x86")); break;
+	case arch_unknown: s = tconcat(s, sv("unknown")); break;
+	}
+	return s;
+}
+
 int size_of_ptr(machine m) {
   switch(m.arch) {
-  case arch_x64: 
+  case arch_x64:
   case arch_arm64: return 8;
   case arch_x86: return 4;
   default: ASSERT(false && "unsupported arch");
