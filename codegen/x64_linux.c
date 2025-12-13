@@ -224,23 +224,41 @@ void codegen_for_x64_linux(intermediate_representation ir, string asm_path) {
 
 			// Passing via stack
 			int stack_size = 0;
-			int j = ins.as.fcall.argc-1;
-			while(j >= i) {
-				argument arg = ins.as.fcall.args[j--];
-				if (arg.size <= 8) {
-					x64_push(out, arg);
-					stack_size += 8;
-				} else if (arg.size <= 16) {
-					// TODO: find actual field size
-					x64_push(out, argument_field(arg, 0, 8));
-					x64_push(out, argument_field(arg, 8, 8));
-					stack_size += 16;
-				} else {
-					x64_load_addr(out, RAX, arg);
-					fprintf(out, "  subq $8, %%rsp\n");
-					fprintf(out, "  movq %%rax, (%%rsp)\n");
-					stack_size += 8;
-				}
+			for (int k = i; k < ins.as.fcall.argc; k++) {
+			    argument arg = ins.as.fcall.args[k];
+			    if (arg.size <= 8)
+			        stack_size += 8;
+			    else if (arg.size <= 16)
+			        stack_size += 16;
+			    else
+			        stack_size += 8;
+			}
+
+			stack_size = (stack_size + 15) & ~15;
+			if (stack_size > 0) {
+			    fprintf(out, "  subq $%d, %%rsp\n", stack_size);
+			}
+
+			int offset = 0;
+			int j = ins.as.fcall.argc - 1;
+			while (j >= i) {
+			    argument arg = ins.as.fcall.args[j--];
+			    if (arg.size <= 8) {
+			        x64_load(out, RAX, arg);
+			        fprintf(out, "  movq %%rax, %d(%%rsp)\n", offset);
+			        offset += 8;
+			    } else if (arg.size <= 16) {
+			        // TODO: find actual field size
+			        x64_load(out, RAX, argument_field(arg, 0, 8));
+			        x64_load(out, RBX, argument_field(arg, 8, 8));
+			        fprintf(out, "  movq %%rax, %d(%%rsp)\n", offset);
+			        fprintf(out, "  movq %%rbx, %d(%%rsp)\n", offset + 8);
+			        offset += 16;
+			    } else {
+			        x64_load_addr(out, RAX, arg);
+			        fprintf(out, "  movq %%rax, %d(%%rsp)\n", offset);
+			        offset += 8;
+			    }
 			}
 
 			fprintf(out, "  call "sfmt"\n", sarg(ins.as.fcall.identifier));
@@ -268,23 +286,22 @@ void codegen_for_x64_linux(intermediate_representation ir, string asm_path) {
 			}
 
 			// Passing via stack
-			int j = ins.as.params.argc-1;
 			int stack_offset = 16;
-			while(j >= i) {
-				argument dst = ins.as.params.args[j--];
+			while(i < ins.as.params.argc) {
+				argument dst = ins.as.params.args[i++];
 				if (dst.size <= 8) {
 					x64_store_indirect(out, RBP, dst, stack_offset);
 					stack_offset += 8;
 				} else if (dst.size <= 16) {
 					// TODO: find actual field size
-					x64_store_indirect(out, RBP, argument_field(dst, 8, 8), stack_offset);
-					x64_store_indirect(out, RBP, argument_field(dst, 0, 8), stack_offset+8);
+		            x64_store_indirect(out, RBP, argument_field(dst, 0, 8), stack_offset);
+		            x64_store_indirect(out, RBP, argument_field(dst, 8, 8), stack_offset + 8);
 					stack_offset += 16;
 				} else {
-					fprintf(out, "  movq %%rax, %d(%%rsp)", stack_offset); // loads the addr from stack
-					x64_load_addr(out, RBX, dst);
-					x64_memcpy(out, RAX, RBX, dst.size);
-					stack_offset += 8;
+		            fprintf(out, "  movq %d(%%rbp), %%rax\n", stack_offset);
+		            x64_load_addr(out, RBX, dst);
+		            x64_memcpy(out, RBX, RAX, dst.size);
+		            stack_offset += 8;
 				}
 			}
 		} break;

@@ -335,7 +335,6 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		            arm64_store_indirect(out, X29, argument_field(dst, 8, 8), stack_offset + 8);
 		            stack_offset += 16;
 		        } else {
-		            // load pointer from caller stack
 		            fprintf(out, "  ldr x0, [x29, #%d]\n", stack_offset);
 		            arm64_load_addr(out, X1, dst);
 		            arm64_memcpy(out, X1, X0, dst.size);
