@@ -30,7 +30,7 @@ typedef enum {
 	op_load_param,
 	// loads the value stored in pointer stored in src1 to dst, loads src2 bytes
 	op_load_indirect,
-	// stores the values of src1 to pointer in dst, stores src2 bytes
+	// stores the value of src1 to pointer in dst, stores src2 bytes
 	op_store_indirect,
 	// copies src2 bytes from src1 to dst
 	op_copy,

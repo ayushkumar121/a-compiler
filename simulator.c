@@ -13,6 +13,7 @@ typedef struct {
 
 #define INVALID_RET (uint64_t)-1
 #define STACK_CAP (1024)
+#define MAX_ARGS 16
 
 uint8_t* globals;
 uint64_t stack[STACK_CAP];
@@ -76,7 +77,7 @@ uint64_t load(argument src) {
 }
 
 void store(argument dst, uint64_t value) {
-	ASSERT(dst.size > 0);
+	if(dst.size == 0) return;
 	if (dst.type == argument_type_vreg) {
 		regs[dst.as.vreg] = value;
 	} else {
@@ -178,32 +179,24 @@ void simulate(intermediate_representation ir) {
 
 		case ins_func_call: {
 			if (regs[30] == (uint64_t)pc) {
-				if (ins.as.fcall.dst.size > 0)
-			        store(ins.as.fcall.dst, regs[0]);
+			    store(ins.as.fcall.dst, regs[0]);
 		        regs[30] = INVALID_RET;
 		        break;
     		}
+
+    		ASSERT(ins.as.fcall.argc <= MAX_ARGS);
     		int slot_index = 0;
 			for (int i = 0; i < ins.as.fcall.argc; ++i) {
-				if (slot_index < 8) {
-					if (ins.as.fcall.args[i].size <= 8) {
-						regs[slot_index++] = load(ins.as.fcall.args[i]);
-					} else if (ins.as.fcall.args[i].size <= 16) {
-						// TODO: find actual field size
-						regs[slot_index++] = load(argument_field(ins.as.fcall.args[i], 0, PTR_SIZE));
-						regs[slot_index++] = load(argument_field(ins.as.fcall.args[i], PTR_SIZE, PTR_SIZE));
-					} else {
-						regs[slot_index++] = (uintptr_t)argument_location(ins.as.fcall.args[i]);
-					}
-		        } else {
-					uint64_t value;
-					if (ins.as.fcall.args[i].size <= PTR_SIZE)
-		            	value = load(ins.as.fcall.args[i]);
-		            else
-		            	value = (uint64_t)argument_location(ins.as.fcall.args[i]);
-		            uint64_t* fp_words = (uint64_t*)(uintptr_t)regs[29];
-		            fp_words[i - 8] = value;
-		        }
+				argument arg = ins.as.fcall.args[i];
+				if (arg.size <= 8) {
+					regs[slot_index++] = load(arg);
+				} else if (arg.size <= 16) {
+					// TODO: find actual field size
+					regs[slot_index++] = load(argument_field(arg, 0, PTR_SIZE));
+					regs[slot_index++] = load(argument_field(arg, PTR_SIZE, PTR_SIZE));
+				} else {
+					regs[slot_index++] = (uintptr_t)argument_location(ins.as.fcall.args[i]);
+				}
 			}
 
 			regs[30] = (uint64_t)pc;
@@ -254,18 +247,16 @@ void simulate(intermediate_representation ir) {
 				ASSERT(ins.as.op.src1.type ==  argument_type_param);
 
 			    int idx = ins.as.op.src1.as.index;
-			    if (idx < 8) {
-			    	if (ins.as.op.src1.size <= PTR_SIZE) {
-						store(ins.as.op.dst, regs[idx]);
-					} else if (ins.as.op.src1.size <= 2*PTR_SIZE) {
-						// TODO: find actual field size
-						store(argument_field(ins.as.op.dst, 0, PTR_SIZE), regs[idx]);
-						store(argument_field(ins.as.op.dst, PTR_SIZE, PTR_SIZE), regs[idx+1]);
-					} else unreachable();
-			    } else {
-			        uint64_t* fp_words = (uint64_t*)(uintptr_t)regs[29];
-			        store(ins.as.op.dst, fp_words[idx - 8]);
-    			}
+			    argument dst = ins.as.op.dst;
+		    	if (ins.as.op.src1.size <= 8) {
+					store(ins.as.op.dst, regs[idx]);
+				} else if (ins.as.op.src1.size <= 16) {
+					// TODO: find actual field size
+					store(argument_field(dst, 0, PTR_SIZE), regs[idx]);
+					store(argument_field(dst, PTR_SIZE, PTR_SIZE), regs[idx+1]);
+				} else {
+					memcpy(argument_location(ins.as.op.dst), (void*)regs[idx], ins.as.op.src1.size);
+				}
 			} break;
 
 			case op_load_indirect: {
