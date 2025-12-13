@@ -459,7 +459,7 @@ string expression_to_string(expression expr) {
 		switch(expr.as.literal.type) {
 		case expression_literal_string: return expr.as.literal.as.string;
 		case expression_literal_char: return tsprintf("%c", expr.as.literal.as.character);
-		case expression_literal_integer: return tsprintf("%ld", expr.as.literal.as.integer);
+		case expression_literal_integer: return tsprintf("%ld", (long)expr.as.literal.as.integer);
 		}
 	}
 	case expression_type_func_call: {

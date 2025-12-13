@@ -64,7 +64,7 @@ void x64_load(FILE* out, x64_register reg, argument src) {
 
 	switch(src.type) {
 	case argument_type_literal:
-		fprintf(out, "  mov%c $%ld, %%%s\n", reg_size, src.as.value, x64_register_name(reg, src.size));
+		fprintf(out, "  mov%c $%llu, %%%s\n", reg_size, src.as.value, x64_register_name(reg, src.size));
 		break;
 
 	case argument_type_local:
@@ -100,7 +100,7 @@ void x64_push(FILE* out, argument src, int stack_offset) {
 	char reg_size = register_size(src.size);
 	switch(src.type) {
 	case argument_type_literal:
-		fprintf(out, "  mov%c $%ld, %d(%%rsp)\n", reg_size, src.as.value, stack_offset);
+		fprintf(out, "  mov%c $%llu, %d(%%rsp)\n", reg_size, src.as.value, stack_offset);
 		break;
 
 	case argument_type_local:
