@@ -243,11 +243,6 @@ void codegen_for_x64_linux(intermediate_representation ir, string asm_path) {
 				}
 			}
 
-			if ((stack_size % 16) != 8) {
-			    fprintf(out, "  subq $8, %%rsp\n");
-			    stack_size += 8;
-			}
-			
 			fprintf(out, "  call "sfmt"\n", sarg(ins.as.fcall.identifier));
 			if (stack_size>0) fprintf(out, "  addq $%d, %%rsp\n", stack_size);
 			x64_store(out, RAX, ins.as.fcall.dst);
@@ -273,9 +268,10 @@ void codegen_for_x64_linux(intermediate_representation ir, string asm_path) {
 			}
 
 			// Passing via stack
+			int j = ins.as.params.argc-1;
 			int stack_offset = 16;
-			while(i < ins.as.params.argc) {
-				argument dst = ins.as.params.args[i++];
+			while(j >= i) {
+				argument dst = ins.as.params.args[j--];
 				if (dst.size <= 8) {
 					x64_store_indirect(out, RBP, dst, stack_offset);
 					stack_offset += 8;
