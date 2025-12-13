@@ -1,0 +1,17 @@
+func log(a string, b string, c string, d string, e string, f string, g string, h string, i string, j string) {
+	print(a);
+	print(b);
+	print(c);
+	print(d);
+	print(e);
+	print(f);
+	print(g);
+	print(h);
+	print(i);
+	print(j);
+	print("\n");
+}
+
+func main() {
+	log("a", "b", "c", "d", "e", "f", "g", "h", "i", "j");
+}

@@ -10,6 +10,7 @@ typedef enum {
 	ins_func_start,
 	ins_func_end,
 	ins_func_call,
+	ins_func_load_params,
 	ins_ret,
 	ins_jmp,
 	ins_jmp_ifnot,
@@ -27,7 +28,7 @@ typedef enum {
 	// stores the values of src1 to dst
 	op_store,
 	// loads the value passed in param to dst
-	op_load_param,
+	//op_load_param,
 	// loads the value stored in pointer stored in src1 to dst, loads src2 bytes
 	op_load_indirect,
 	// stores the value of src1 to pointer in dst, stores src2 bytes
@@ -49,7 +50,7 @@ typedef enum {
 	argument_type_vreg,
 	argument_type_local,
 	argument_type_global,
-	argument_type_param,
+	// argument_type_param,
 	argument_type_string,
 	argument_type_literal,
 } argument_type;
@@ -58,7 +59,7 @@ typedef struct {
 	argument_type type;
 	int size;
 	union {
-		uint64_t value;
+		int value;
 		int index;
 		int offset;
 		virtual_register vreg;
@@ -78,6 +79,7 @@ typedef struct {
 		frame* frame;
 		argument ret;
 		string label;
+		struct {int argc; argument* args;} params;
 		struct {op_type type; argument dst, src1, src2;} op;
 		struct {argument dst; string identifier; int argc; argument* args;} fcall;
 		struct {string label;} jmp;
@@ -296,6 +298,10 @@ inline static void add_instruction_func_call(argument dst, string identifier, in
 	array_append(&instructions, ((instruction){.type=ins_func_call, .as = {.fcall={.dst=dst, .identifier=identifier, .argc=argc, .args=args}}}));
 }
 
+inline static void add_instruction_func_load_params(int argc, argument* args) {
+	array_append(&instructions, ((instruction){.type=ins_func_load_params, .as = {.params={.argc=argc, .args=args}}}));
+}
+
 inline static void add_instruction_op(op_type optype, argument dst, argument src1) {
 	array_append(&instructions, ((instruction){.type=ins_binop, .as = {.op={.type=optype, .dst=dst, .src1=src1}}}));
 }
@@ -334,9 +340,9 @@ inline static argument argument_global(int offset, int size) {
 	return (argument){.type=argument_type_global, .size=size, .as={.offset=offset}};
 }
 
-inline static argument argument_param(int index, int size) {
-	return (argument){.type=argument_type_param, .size=size, .as={.index=index}};
-}
+// inline static argument argument_param(int index, int size) {
+// 	return (argument){.type=argument_type_param, .size=size, .as={.index=index}};
+// }
 
 argument argument_allocate(frame* frame, int size) {
     size_t alignment = max(size, 8);
@@ -875,6 +881,9 @@ void compile_function(function func) {
 	frame->identifier = func.identifier;
 	add_instruction_func_start(frame);
 	symbol* saved = symbol_top;
+
+	// loading of params into local vars
+	argument* params = malloc(sizeof(argument)*func.arguments.len);
 	for (int i=0; i<func.arguments.len; i++) {
 		binding bind = func.arguments.ptr[i];
 		type decl_type = resolve_complete_type(bind.type);
@@ -884,10 +893,11 @@ void compile_function(function func) {
 		}
 
 		int size = size_of_type(&decl_type);
-		argument dst = argument_allocate(frame, size);
-		add_instruction_op(op_load_param, dst, argument_param(i, size));
-		symbol_add(symbol_type_local, bind.identifier, decl_type, dst.as.offset);
+		params[i] = argument_allocate(frame, size);
+		symbol_add(symbol_type_local, bind.identifier, decl_type, params[i].as.offset);
 	}
+	add_instruction_func_load_params(func.arguments.len, params);
+
 	compile_statement_list(frame, func.body);
 	symbol_restore(saved);
 	add_instruction_label(current_func_name_end);

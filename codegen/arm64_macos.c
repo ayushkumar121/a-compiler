@@ -121,26 +121,26 @@ void arm64_load_addr(FILE* out, int reg, argument src) {
 	}
 }
 
-void load_param(FILE* out, argument src, argument dst) {
-	ASSERT(dst.type == argument_type_local);
-	ASSERT(src.type == argument_type_param);
+// void load_param(FILE* out, argument src, argument dst) {
+// 	ASSERT(dst.type == argument_type_local);
+// 	ASSERT(src.type == argument_type_param);
 
-	int index = src.as.index;
-	char reg_size = dst.size <= 4? 'w':'x';
-	if (index < 8) {
-		if (src.size <= PTR_SIZE) {
-        	fprintf(out, "   str %c%d, [x29, #-%d]\n",  reg_size, src.as.index, dst.as.offset);
-    	} else if (src.size <= 2*PTR_SIZE) {
-			// TODO: find actual field size
-    		arm64_store(out, src.as.index, argument_field(dst, 0, PTR_SIZE));
-    		arm64_store(out, src.as.index+1, argument_field(dst, PTR_SIZE, PTR_SIZE));
-    	} else unreachable();
-    } else {
-        int slot = index - 8;
-        fprintf(out, "   ldr %c0, [x29, #%d]\n", reg_size,  16 + slot*8);
-        fprintf(out, "   str %c0, [x29, #-%d]\n",reg_size, dst.as.offset);
-    }
-}
+// 	int index = src.as.index;
+// 	char reg_size = dst.size <= 4? 'w':'x';
+// 	if (index < 8) {
+// 		if (src.size <= PTR_SIZE) {
+//         	fprintf(out, "   str %c%d, [x29, #-%d]\n",  reg_size, src.as.index, dst.as.offset);
+//     	} else if (src.size <= 2*PTR_SIZE) {
+// 			// TODO: find actual field size
+//     		arm64_store(out, src.as.index, argument_field(dst, 0, PTR_SIZE));
+//     		arm64_store(out, src.as.index+1, argument_field(dst, PTR_SIZE, PTR_SIZE));
+//     	} else unreachable();
+//     } else {
+//         int slot = index - 8;
+//         fprintf(out, "   ldr %c0, [x29, #%d]\n", reg_size,  16 + slot*8);
+//         fprintf(out, "   str %c0, [x29, #-%d]\n",reg_size, dst.as.offset);
+//     }
+// }
 
 string arm64_macos_label(string l) {
 	if (!inside_function) {
@@ -305,10 +305,10 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 				arm64_store(out, 0, ins.as.op.dst);
 				break;
 
-			case op_load_param:
-				fprintf(out, "; op_load_param\n");
-				load_param(out, ins.as.op.src1, ins.as.op.dst);
-				break;
+			// case op_load_param:
+			// 	fprintf(out, "; op_load_param\n");
+			// 	load_param(out, ins.as.op.src1, ins.as.op.dst);
+			// 	break;
 
 			case op_load_indirect:
 				fprintf(out, "; op_load_indirect\n");
