@@ -1,5 +1,12 @@
 typedef enum {
-	X0, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, arm64_register_count
+    X0 = 0, X1, X2, X3, X4, X5, X6, X7,
+    X8, X9, X10, X11, X12, X13, X14, X15,
+    X16, X17, X18,
+    X19, X20, X21, X22, X23, X24, X25, X26, X27, X28,
+    X29,        // fp
+    X30,        // lr
+    SP,         // stack pointer
+    arm64_register_count
 } arm64_register;
 
 arm64_register arm64_vreg_mapping[vreg_count] = {
@@ -8,6 +15,31 @@ arm64_register arm64_vreg_mapping[vreg_count] = {
 	[VR2] = X11,
 	[VR3] = X12,
 };
+
+const char* arm64_register_name(arm64_register reg, int size) {
+    static const char* xnames[] = {
+        "x0","x1","x2","x3","x4","x5","x6","x7",
+        "x8","x9","x10","x11","x12","x13","x14","x15",
+        "x16","x17","x18",
+        "x19","x20","x21","x22","x23","x24","x25","x26","x27","x28",
+        "x29","x30","sp"
+    };
+
+    static const char* wnames[] = {
+        "w0","w1","w2","w3","w4","w5","w6","w7",
+        "w8","w9","w10","w11","w12","w13","w14","w15",
+        "w16","w17","w18",
+        "w19","w20","w21","w22","w23","w24","w25","w26","w27","w28",
+        "w29","w30","wsp"
+    };
+
+    if (size <= 4)
+        return wnames[reg];
+    if (size <= 8)
+        return xnames[reg];
+
+    unreachable();
+}
 
 void load_immediate(FILE* out, int reg, size_t size, size_t value) {
 	char reg_size = size <= 4 ? 'w' : 'x';
@@ -45,7 +77,12 @@ void arm64_load(FILE* out, int reg, argument src) {
 		break;
 
 	case argument_type_local:
-		fprintf(out, "  ldr %c%d, [x29, #-%d]\n", reg_size, reg, src.as.offset);
+		if (src.as.offset >= -256 && src.as.offset <= 255) {
+			fprintf(out, "  ldr %c%d, [x29, #-%d]\n", reg_size, reg, src.as.offset);
+		} else {
+			fprintf(out, "  sub x9, x29, #%d\n", src.as.offset);
+			fprintf(out, "  ldr %c%d, [x9]\n", reg_size, reg);
+		}
 		break;
 
 	case argument_type_global:
@@ -57,48 +94,6 @@ void arm64_load(FILE* out, int reg, argument src) {
 	case argument_type_string:
     	fprintf(out, "  adrp x%d, .LC%d@PAGE\n", reg, src.as.index);
 		fprintf(out, "  add x%d, x%d, .LC%d@PAGEOFF\n", reg, reg, src.as.index);
-		break;
-
-	default: unreachable();
-	}
-}
-
-void arm64_store(FILE* out, int reg, argument dst) {
-	if(dst.size == 0) return;
-	ASSERT(dst.size <= PTR_SIZE);
-	char reg_size = dst.size <= 4? 'w':'x';
-	switch(dst.type) {
-	case argument_type_vreg:
-		ASSERT(reg != arm64_vreg_mapping[dst.as.vreg]);
-    	fprintf(out, "  mov %c%d, %c%d\n", reg_size, arm64_vreg_mapping[dst.as.vreg], reg_size, reg);
-		break;
-
-	case argument_type_local:
-		fprintf(out, "  str %c%d, [x29, #-%d]\n", reg_size, reg, dst.as.offset);
-		break;
-
-	case argument_type_global:
-    	fprintf(out, "  adrp x9, _globals@PAGE\n");
-		fprintf(out, "  add x9, x9, _globals@PAGEOFF\n");
-		fprintf(out, "  str %c%d, [x9, #%d]\n", reg_size, reg, dst.as.offset);
-		break;
-
-	default: unreachable();
-	}
-}
-
-void arm64_push(FILE* out, argument src, int stack_offset) {
-	ASSERT(src.size <= 8);
-	fprintf(out, "  sub sp, sp, #8\n");
-	char reg_size = src.size <= 4? 'w':'x';
-	switch(src.type) {
-	case argument_type_literal:
-		fprintf(out, "  str #%d, [sp, #%d]\n", (int)src.as.value, -stack_offset);
-		break;
-
-	case argument_type_local:
-		fprintf(out, "  ldr %c0 [x29, #-%d]\n", reg_size, src.as.offset);
-		fprintf(out, "  str %c0 [sp, #%d]\n", reg_size, -stack_offset);
 		break;
 
 	default: unreachable();
@@ -121,26 +116,68 @@ void arm64_load_addr(FILE* out, int reg, argument src) {
 	}
 }
 
-// void load_param(FILE* out, argument src, argument dst) {
-// 	ASSERT(dst.type == argument_type_local);
-// 	ASSERT(src.type == argument_type_param);
+void arm64_store(FILE* out, int reg, argument dst) {
+	if(dst.size == 0) return;
+	ASSERT(dst.size <= PTR_SIZE);
+	char reg_size = dst.size <= 4? 'w':'x';
 
-// 	int index = src.as.index;
-// 	char reg_size = dst.size <= 4? 'w':'x';
-// 	if (index < 8) {
-// 		if (src.size <= PTR_SIZE) {
-//         	fprintf(out, "   str %c%d, [x29, #-%d]\n",  reg_size, src.as.index, dst.as.offset);
-//     	} else if (src.size <= 2*PTR_SIZE) {
-// 			// TODO: find actual field size
-//     		arm64_store(out, src.as.index, argument_field(dst, 0, PTR_SIZE));
-//     		arm64_store(out, src.as.index+1, argument_field(dst, PTR_SIZE, PTR_SIZE));
-//     	} else unreachable();
-//     } else {
-//         int slot = index - 8;
-//         fprintf(out, "   ldr %c0, [x29, #%d]\n", reg_size,  16 + slot*8);
-//         fprintf(out, "   str %c0, [x29, #-%d]\n",reg_size, dst.as.offset);
-//     }
-// }
+	switch(dst.type) {
+	case argument_type_vreg:
+		ASSERT(reg != arm64_vreg_mapping[dst.as.vreg]);
+    	fprintf(out, "  mov %c%d, %c%d\n", reg_size, arm64_vreg_mapping[dst.as.vreg], reg_size, reg);
+		break;
+
+	case argument_type_local:
+		if (dst.as.offset >= -256 && dst.as.offset <= 255) {
+			fprintf(out, "  str %c%d, [x29, #-%d]\n", reg_size, reg, dst.as.offset);
+		} else {
+			fprintf(out, "  sub x9, x29, #%d\n", dst.as.offset);
+			fprintf(out, "  str %c%d, [x9]\n", reg_size, reg);
+		}
+		break;
+
+	case argument_type_global:
+    	fprintf(out, "  adrp x9, _globals@PAGE\n");
+		fprintf(out, "  add x9, x9, _globals@PAGEOFF\n");
+		fprintf(out, "  str %c%d, [x9, #%d]\n", reg_size, reg, dst.as.offset);
+		break;
+
+	default: unreachable();
+	}
+}
+
+void arm64_store_indirect(FILE* out, arm64_register src, argument dst, int offset) {
+	ASSERT(dst.size <= 8);
+	if(dst.size == 0) return;
+	char reg_size = dst.size <= 4? 'w':'x';
+
+	switch(dst.type) {
+	case argument_type_local:
+		fprintf(out, "  ldr %c0, [%s, #%d]\n", reg_size, arm64_register_name(src, 8), offset);
+		if (dst.as.offset >= -256 && dst.as.offset <= 255) {
+			fprintf(out, "  str %c0, [x29, #-%d]\n", reg_size, dst.as.offset);
+		} else {
+			fprintf(out, "  sub x9, x29, #%d\n", dst.as.offset);
+			fprintf(out, "  str %c0, [x9]\n", reg_size);
+		}
+		break;
+
+	default: unreachable();
+	}
+}
+
+void arm64_memcpy(FILE* out, arm64_register dst, arm64_register src, int n) {
+	ASSERT(n >= 0);
+	if (n == 0) return;
+	fprintf(out, "  mov x9, #%d\n", n);
+	fprintf(out, "1:\n");
+	fprintf(out, "  cbz x9, 2f\n");
+	fprintf(out, "  ldrb w10, [%s], #1\n", arm64_register_name(src, 8));
+	fprintf(out, "  strb w10, [%s], #1\n",  arm64_register_name(dst, 8));
+	fprintf(out, "  sub x9, x9, #1\n");
+	fprintf(out, "  b 1b\n");
+	fprintf(out, "2:\n");
+}
 
 string arm64_macos_label(string l) {
 	if (!inside_function) {
@@ -210,43 +247,102 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			inside_function = false;
 			break;
 
-		case ins_func_call:
+		case ins_func_call: {
 			fprintf(out, "; ins_func_call\n");
+			// Passed via register
 			int slot_index = 0;
-			int stack_size = 0;
-			for (int i = 0; i < ins.as.fcall.argc; ++i) {
-				argument arg = ins.as.fcall.args[i];
-				if (slot_index < 8) {
-					if (arg.size <= 8) {
-						arm64_load(out, slot_index++, arg);
-					} else if (arg.size <= 16) {
-						// TODO: find actual field size
-						arm64_load(out, slot_index++, argument_field(arg, 0, PTR_SIZE));
-						arm64_load(out, slot_index++, argument_field(arg, PTR_SIZE, PTR_SIZE));
-					} else {
-						arm64_load_addr(out, slot_index++, arg);
-					}
-		        } else {
-					if (arg.size <= 8) {
-						arm64_push(out, arg, 0);
-						stack_size += 8;
-					} else if (arg.size <= 16) {
-						// TODO: find actual field size
-						arm64_push(out, argument_field(arg, 0, 8), 0);
-						arm64_push(out, argument_field(arg, 8, 8), 8);
-						stack_size += 16;
-					} else {
-						arm64_load_addr(out, X0, arg);
-						fprintf(out, "  sub sp, sp, #8\n");
-						fprintf(out, "  str rax, [sp, #0]\n");
-						stack_size += 8;
-					}
-		        }
+			int i = 0;
+			while (i < ins.as.fcall.argc && slot_index < 8) {
+				argument arg = ins.as.fcall.args[i++];
+				if (arg.size <= 8) {
+					arm64_load(out, (arm64_register)slot_index++, arg);
+				} else if (arg.size <= 16) {
+					// TODO: find actual field size
+					arm64_load(out, (arm64_register)slot_index++, argument_field(arg, 0, 8));
+					arm64_load(out, (arm64_register)slot_index++, argument_field(arg, 8, 8));
+				} else {
+					arm64_load_addr(out, (arm64_register)slot_index++, arg);
+				}
 			}
+
+			// Passing via stack
+			int stack_size = 0;
+			for (int k = i; k < ins.as.fcall.argc; k++) {
+			    argument arg = ins.as.fcall.args[k];
+			    if (arg.size <= 8)
+			        stack_size += 8;
+			    else if (arg.size <= 16)
+			        stack_size += 16;
+			    else
+			        stack_size += 8;
+			}
+			stack_size = align(stack_size, 16);
+			if (stack_size>0) fprintf(out, "  sub sp, sp, #%d\n", stack_size);
+
+			int offset = 0;
+			while (i < ins.as.fcall.argc) {
+			    argument arg = ins.as.fcall.args[i++];
+			    if (arg.size <= 8) {
+			        arm64_load(out, X9, arg);
+			        fprintf(out, "  str x9, [sp, #%d]\n", offset);
+			        offset += 8;
+			    } else if (arg.size <= 16) {
+			        arm64_load(out, X9, argument_field(arg, 0, 8));
+			        arm64_load(out, X10, argument_field(arg, 8, 8));
+			        fprintf(out, "  str x9,  [sp, #%d]\n", offset);
+			        fprintf(out, "  str x10, [sp, #%d]\n", offset + 8);
+			        offset += 16;
+			    } else {
+			        arm64_load_addr(out, X9, arg);
+			        fprintf(out, "  str x9, [sp, #%d]\n", offset);
+			        offset += 8;
+			    }
+			}
+
 			fprintf(out, "  bl _"sfmt"\n", sarg(ins.as.fcall.identifier));
 			if (stack_size>0) fprintf(out, "  add sp, sp, #%d\n", stack_size);
 			arm64_store(out, 0, ins.as.fcall.dst);
-			break;
+		} break;
+
+		case ins_func_load_params: {
+		    fprintf(out, "; ins_func_load_params\n");
+
+		    int slot_index = 0;
+		    int i = 0;
+
+		    while (i < ins.as.params.argc && slot_index < 8) {
+		        argument dst = ins.as.params.args[i++];
+		        if (dst.size <= 8) {
+		            arm64_store(out, (arm64_register)slot_index++, dst);
+		        } else if (dst.size <= 16) {
+		            arm64_store(out, (arm64_register)slot_index++, argument_field(dst, 0, 8));
+		            arm64_store(out, (arm64_register)slot_index++, argument_field(dst, 8, 8));
+		        } else {
+		            // register holds pointer
+		            arm64_load_addr(out, X1, dst);
+		            arm64_memcpy(out, X1, (arm64_register)slot_index++, dst.size);
+		        }
+		    }
+
+		    int stack_offset = 16;
+		    while (i < ins.as.params.argc) {
+		        argument dst = ins.as.params.args[i++];
+		        if (dst.size <= 8) {
+		            arm64_store_indirect(out, X29, dst, stack_offset);
+		            stack_offset += 8;
+		        } else if (dst.size <= 16) {
+		            arm64_store_indirect(out, X29, argument_field(dst, 0, 8), stack_offset);
+		            arm64_store_indirect(out, X29, argument_field(dst, 8, 8), stack_offset + 8);
+		            stack_offset += 16;
+		        } else {
+		            // load pointer from caller stack
+		            fprintf(out, "  ldr x0, [x29, #%d]\n", stack_offset);
+		            arm64_load_addr(out, X1, dst);
+		            arm64_memcpy(out, X1, X0, dst.size);
+		            stack_offset += 8;
+		        }
+		    }
+		} break;
 
 		case ins_ret:
 			fprintf(out, "; ins_ret\n");
@@ -304,11 +400,6 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 				arm64_load_addr(out, 0, ins.as.op.src1);
 				arm64_store(out, 0, ins.as.op.dst);
 				break;
-
-			// case op_load_param:
-			// 	fprintf(out, "; op_load_param\n");
-			// 	load_param(out, ins.as.op.src1, ins.as.op.dst);
-			// 	break;
 
 			case op_load_indirect:
 				fprintf(out, "; op_load_indirect\n");

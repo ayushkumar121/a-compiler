@@ -32,7 +32,7 @@ const char* x64_register_name(x64_register reg, int size)
 	    [R14] = {"r14b", "r14d", "r14"},
 	    [R15] = {"r15b", "r15d", "r15"},
 	    [RAX] = {"al",   "eax",  "rax"},
-	    [RAX] = {"bl",   "ebx",  "rbx"},
+	    [RBX] = {"bl",   "ebx",  "rbx"},
 	    [RSP] = {"sp",   "esp",  "rsp"},
 	    [RBP] = {"bp",   "ebp",  "rbp"},
 	};
@@ -97,7 +97,7 @@ void x64_store(FILE* out, x64_register reg, argument dst) {
 	}
 }
 
-void x64_store_indirect(FILE* out, x64_register reg, argument dst, int offset) {
+void x64_store_indirect(FILE* out, x64_register src, argument dst, int offset) {
 	if(dst.size == 0) return;
 
 	ASSERT(dst.size <= 8);
@@ -105,21 +105,12 @@ void x64_store_indirect(FILE* out, x64_register reg, argument dst, int offset) {
 
 	switch(dst.type) {
 	case argument_type_local:
-		fprintf(out, "  mov%c %d(%%%s), %%rax\n", reg_size, offset, x64_register_name(reg, dst.size));
+		fprintf(out, "  mov%c %d(%%%s), %%rax\n", reg_size, offset, x64_register_name(src, dst.size));
 		fprintf(out, "  mov%c %%rax, -%d(%%rbp)\n", reg_size, dst.as.offset);
 		break;
 
 	default: unreachable();
 	}
-}
-
-void x64_memcpy(FILE* out, x64_register dst, x64_register src, int n) {
-	ASSERT(n >= 0);
-	if (n == 0) return;
-	fprintf(out, "  movq $%d, %%rcx\n", n);
-	fprintf(out, "  movq %%%s, %%rsi\n", x64_register_name(src, 8));
-	fprintf(out, "  movq %%%s, %%rdi\n", x64_register_name(dst, 8));
-	fprintf(out, "  rep movsb\n");
 }
 
 void x64_push(FILE* out, argument src) {
@@ -138,6 +129,15 @@ void x64_push(FILE* out, argument src) {
 
 	default: unreachable();
 	}
+}
+
+void x64_memcpy(FILE* out, x64_register dst, x64_register src, int n) {
+	ASSERT(n >= 0);
+	if (n == 0) return;
+	fprintf(out, "  movq $%d, %%rcx\n", n);
+	fprintf(out, "  movq %%%s, %%rsi\n", x64_register_name(src, 8));
+	fprintf(out, "  movq %%%s, %%rdi\n", x64_register_name(dst, 8));
+	fprintf(out, "  rep movsb\n");
 }
 
 string x64_linux_label(string label) {
@@ -243,6 +243,11 @@ void codegen_for_x64_linux(intermediate_representation ir, string asm_path) {
 				}
 			}
 
+			if ((stack_size % 16) != 8) {
+			    fprintf(out, "  subq $8, %%rsp\n");
+			    stack_size += 8;
+			}
+			
 			fprintf(out, "  call "sfmt"\n", sarg(ins.as.fcall.identifier));
 			if (stack_size>0) fprintf(out, "  addq $%d, %%rsp\n", stack_size);
 			x64_store(out, RAX, ins.as.fcall.dst);
@@ -262,17 +267,15 @@ void codegen_for_x64_linux(intermediate_representation ir, string asm_path) {
 					x64_store(out, (x64_register)slot_index++, argument_field(dst, 0, 8));
 					x64_store(out, (x64_register)slot_index++, argument_field(dst, 8, 8));
 				} else {
-					x64_load(out, RAX, (x64_register)slot_index++);
-					x64_load_addr(out, RBX, dst);
-					x64_memcpy(out, RAX, RBX, dst.size);
+					x64_load_addr(out, RAX, dst);
+					x64_memcpy(out, RAX, (x64_register)slot_index++, dst.size);
 				}
 			}
 
 			// Passing via stack
-			int j = ins.as.params.argc-1;
 			int stack_offset = 16;
-			while(j >= i) {
-				argument dst = ins.as.params.args[j--];
+			while(i < ins.as.params.argc) {
+				argument dst = ins.as.params.args[i++];
 				if (dst.size <= 8) {
 					x64_store_indirect(out, RBP, dst, stack_offset);
 					stack_offset += 8;
@@ -282,7 +285,7 @@ void codegen_for_x64_linux(intermediate_representation ir, string asm_path) {
 					x64_store_indirect(out, RBP, argument_field(dst, 0, 8), stack_offset+8);
 					stack_offset += 16;
 				} else {
-					fprintf(out, "  movq %%rax, %d(%%rsp)", stack_offset); // loads the addr
+					fprintf(out, "  movq %%rax, %d(%%rsp)", stack_offset); // loads the addr from stack
 					x64_load_addr(out, RBX, dst);
 					x64_memcpy(out, RAX, RBX, dst.size);
 					stack_offset += 8;
