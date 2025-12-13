@@ -233,7 +233,7 @@ void codegen_for_x64_linux(intermediate_representation ir, string asm_path) {
 			    else
 			        stack_size += 8;
 			}
-
+			
 			stack_size = (stack_size + 15) & ~15;
 			if (stack_size > 0) {
 			    fprintf(out, "  subq $%d, %%rsp\n", stack_size);
@@ -286,9 +286,10 @@ void codegen_for_x64_linux(intermediate_representation ir, string asm_path) {
 			}
 
 			// Passing via stack
+			int j = ins.as.params.argc-1;
 			int stack_offset = 16;
-			while(i < ins.as.params.argc) {
-				argument dst = ins.as.params.args[i++];
+			while(j >= i) {
+				argument dst = ins.as.params.args[j--];
 				if (dst.size <= 8) {
 					x64_store_indirect(out, RBP, dst, stack_offset);
 					stack_offset += 8;
