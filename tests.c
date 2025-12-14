@@ -2,6 +2,7 @@
 int error_count = 0;
 
 #include "basic.c"
+#include "arena.c"
 #include "lexer.c"
 #include "types.c"
 #include "parser.c"
@@ -73,6 +74,7 @@ void test_compiler_004(void) {
 }
 
 int main(void) {
+	arena_init(&ga, GLOBAL_ARENA_CAP);
 	test_type_parsing();
 	test_infix_expr_parsing();
 	test_prefix_expr_parsing();

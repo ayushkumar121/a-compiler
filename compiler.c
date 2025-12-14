@@ -127,10 +127,10 @@ string current_func_name;
 string current_func_name_end;
 
 void symbol_add(symbol_type symbol_type, string identifier, type type, int offset) {
-	symbol* new_symbol = malloc(sizeof(symbol));
+	symbol* new_symbol = arena_alloc(&ga, sizeof(symbol));
 	new_symbol->symbol_type = symbol_type;
 	new_symbol->identifier = identifier;
-	new_symbol->type = malloc(sizeof(type));
+	new_symbol->type = arena_alloc(&ga, sizeof(type));
 	memcpy(new_symbol->type, &type, sizeof(type));
 	new_symbol->offset = offset;
 	new_symbol->next = symbol_top;
@@ -156,20 +156,6 @@ symbol* symbol_lookup(string identifier, symbol_type symbol_type) {
 		iter = iter->next;
 	}
 	return NULL;
-}
-
-// top = [1] -> [2] -> null
-// saved = [2] -> null
-void symbol_restore(symbol* saved) {
-	ASSERT(symbol_top != NULL);
-	symbol* s = symbol_top;
-	while(s != saved && s != NULL) {
-		symbol* next = s->next;
-		type_free(s->type);
-		free(s);
-		s = next;
-	}
-	symbol_top = saved;
 }
 
 type resolve_complete_type(type type) {
@@ -425,7 +411,7 @@ type type_of_expression(expression expr) {
 			switch(expr.as.tree.op) {
 			case operator_ampersand: {
 				type tmp = type_of_expression(expr.as.tree.operands.ptr[0]);
-				type* inner = malloc(sizeof(type));
+				type* inner = arena_alloc(&ga, sizeof(type));
 				memcpy(inner, &tmp, sizeof(type));
 				return type_of_wrapped(wrapped_type_pointer, inner);
 			}
@@ -750,7 +736,7 @@ void compile_statement(frame* frame, statement stm) {
 	case statement_type_list: {
 		symbol* saved = symbol_top;
 		compile_statement_list(frame, stm.as.list);
-		symbol_restore(saved);
+		symbol_top = saved;
 	} break;
 
 	case statement_type_decl: {
@@ -878,7 +864,7 @@ void compile_function(function func) {
 	symbol* saved = symbol_top;
 
 	// loading of params into local vars
-	argument* params = malloc(sizeof(argument)*func.arguments.len);
+	argument* params = arena_alloc(&ga, sizeof(argument)*func.arguments.len);
 	for (int i=0; i<func.arguments.len; i++) {
 		binding bind = func.arguments.ptr[i];
 		type decl_type = resolve_complete_type(bind.type);
@@ -894,7 +880,7 @@ void compile_function(function func) {
 	add_instruction_func_load_params(func.arguments.len, params);
 
 	compile_statement_list(frame, func.body);
-	symbol_restore(saved);
+	symbol_top = saved;
 	add_instruction_label(current_func_name_end);
 	add_instruction_func_end(frame);
 }
@@ -904,7 +890,7 @@ void compile_builtin(builtin b) {
 	case builtin_print: {
 		type typ = {0};
 		typ.type = type_function;
-		typ.as.function.return_type = malloc(sizeof(type));
+		typ.as.function.return_type = arena_alloc(&ga, sizeof(type));
 		typ.as.function.identifier = sv("print");
 		*(typ.as.function.return_type) = type_of_primitive(primitive_void);
 		array_append(&typ.as.function.arguments, type_of_primitive(primitive_string));
@@ -914,7 +900,7 @@ void compile_builtin(builtin b) {
 	case builtin_exit: {
 		type typ = {0};
 		typ.type = type_function;
-		typ.as.function.return_type = malloc(sizeof(type));
+		typ.as.function.return_type = arena_alloc(&ga, sizeof(type));
 		typ.as.function.identifier = sv("exit");
 		*(typ.as.function.return_type) = type_of_primitive(primitive_void);
 		array_append(&typ.as.function.arguments, type_of_primitive(primitive_int));
@@ -935,13 +921,10 @@ intermediate_representation compile(program prg) {
 	for (int i=0; i<prg.structs.len; i++) {
 		compile_structure(prg.structs.ptr[i]);
 	}
-	structs_free(prg.structs);
 
 	for (int i=0; i<prg.functions.len; i++) {
 		compile_function(prg.functions.ptr[i]);
 	}
-	functions_free(prg.functions);
 
-	//symbol_restore(NULL);
 	return (intermediate_representation){string_literals, instructions};
 }

@@ -416,8 +416,8 @@ type type_of_struct(structure s) {
 	typ.as.structure.identifier = s.identifier;
 	typ.as.structure.complete = true;
 	typ.as.structure.field_count = s.parameters.len;
-	typ.as.structure.field_names = malloc(typ.as.structure.field_count*sizeof(string));
-	typ.as.structure.field_types = malloc(typ.as.structure.field_count*sizeof(type));
+	typ.as.structure.field_names = arena_alloc(&ga, typ.as.structure.field_count*sizeof(string));
+	typ.as.structure.field_types = arena_alloc(&ga, typ.as.structure.field_count*sizeof(type));
 	for (int i=0; i<typ.as.structure.field_count; i++) {
 		typ.as.structure.field_names[i] = s.parameters.ptr[i].identifier;
 		typ.as.structure.field_types[i] = s.parameters.ptr[i].type;
@@ -428,7 +428,7 @@ type type_of_struct(structure s) {
 type type_of_function(function fn) {
 	type typ = {0};
 	typ.type = type_function;
-	typ.as.function.return_type = malloc(sizeof(type));
+	typ.as.function.return_type = arena_alloc(&ga, sizeof(type));
 	typ.as.function.identifier = fn.identifier;
 	*(typ.as.function.return_type) = fn.return_type;
 	for (int i=0; i<fn.arguments.len; i++) {
@@ -443,29 +443,6 @@ type type_of_wrapped(wrapped_type_type wrapped_type, type* inner) {
 	typ.as.wrapped.type = wrapped_type;
 	typ.as.wrapped.inner = inner;
 	return typ;
-}
-
-void type_free(type* t) {
-	ASSERT(t != NULL);
-	switch(t->type) {
-	case type_none:
-	case type_primitive:
-		break;
-	case type_wrapped:
-		type_free(t->as.wrapped.inner);
-		break;
-	case type_array:
-		type_free(t->as.array.inner);
-		break;
-	case type_struct:
-		if (t->as.structure.field_count>0) type_free(t->as.structure.field_types);
-		break;
-	case type_function:
-		if (t->as.function.arguments.len>0) type_free(t->as.function.arguments.ptr);
-		type_free(t->as.function.return_type);
-		break;
-	}
-	free(t);
 }
 
 // Parsers
@@ -503,17 +480,17 @@ type parse_type(lexer* lex) {
 	if (t.type == token_star) {
 		typ.type = type_wrapped;
 		typ.as.wrapped.type = wrapped_type_pointer;
-		typ.as.wrapped.inner = malloc(sizeof(type));
+		typ.as.wrapped.inner = arena_alloc(&ga, sizeof(type));
 		*(typ.as.wrapped.inner) = parse_type(lex);
 	} else if (t.type == token_question) {
 		typ.type = type_wrapped;
 		typ.as.wrapped.type = wrapped_type_optional;
-		typ.as.wrapped.inner = malloc(sizeof(type));
+		typ.as.wrapped.inner = arena_alloc(&ga, sizeof(type));
 		*(typ.as.wrapped.inner) = parse_type(lex);
 	} else if (t.type == token_exclaimation) {
 		typ.type = type_wrapped;
 		typ.as.wrapped.type = wrapped_type_result;
-		typ.as.wrapped.inner = malloc(sizeof(type));
+		typ.as.wrapped.inner = arena_alloc(&ga, sizeof(type));
 		*(typ.as.wrapped.inner) = parse_type(lex);
 	} else if (t.type == token_left_bracket) {
 		t = lexer_next_token(lex);
@@ -526,7 +503,7 @@ type parse_type(lexer* lex) {
 				report_parser_error(lex, tconcat(sv("expected ] but got"), t.value));
 				return type_error;
 			}
-			typ.as.array.inner = malloc(sizeof(type));
+			typ.as.array.inner = arena_alloc(&ga, sizeof(type));
 			*(typ.as.array.inner) = parse_type(lex);
 		} else {
 			typ.type = type_wrapped;
@@ -535,14 +512,14 @@ type parse_type(lexer* lex) {
 				return type_error;
 			}
 			typ.as.wrapped.type = wrapped_type_slice;
-			typ.as.wrapped.inner = malloc(sizeof(type));
+			typ.as.wrapped.inner = arena_alloc(&ga, sizeof(type));
 			*(typ.as.wrapped.inner) = parse_type(lex);
 		}
 	} else if (t.type == token_keyword) {
 		if (t.keyword == keyword_const) {
 			typ.type = type_wrapped;
 			typ.as.wrapped.type = wrapped_type_constant;
-			typ.as.wrapped.inner = malloc(sizeof(type));
+			typ.as.wrapped.inner = arena_alloc(&ga, sizeof(type));
 			*(typ.as.wrapped.inner) = parse_type(lex);
 		} else {
 			typ.type = type_primitive;
@@ -580,7 +557,7 @@ type parse_type(lexer* lex) {
 		lexer_next_token(lex);
 
 		// TODO:Make return type optional
-		typ.as.function.return_type = malloc(sizeof(type));
+		typ.as.function.return_type = arena_alloc(&ga, sizeof(type));
 		*(typ.as.function.return_type) = parse_type(lex);
 	} else {
 		report_parser_error(lex, tconcat(sv("unexpected token "), t.value));
@@ -1123,21 +1100,6 @@ statement parse_statement(lexer* lex) {
 	return s;
 }
 
-void statements_free(statement_list stms) {
-	for (int i=0; i<stms.len; i++) {
-		switch(stms.ptr[i].type) {
-		case statement_type_list:
-			statements_free(stms.ptr[i].as.list);
-			break;
-		case statement_type_func_call:
-			free(stms.ptr[i].as.func_call.expressions.ptr);
-			break;
-		default: break;
-		}
-	}
-	free(stms.ptr);
-}
-
 structure parse_struct(lexer* lex) {
 	structure s = {0};
 	s.loc = lexer_current_loc(lex);
@@ -1174,10 +1136,6 @@ structure parse_struct(lexer* lex) {
 	}
 
 	return s;
-}
-
-void structs_free(structure_list structs) {
-	free(structs.ptr);
 }
 
 function parse_function(lexer* lex) {
@@ -1244,14 +1202,6 @@ function parse_function(lexer* lex) {
 	lexer_next_token(lex);
 
 	return func;
-}
-
-void functions_free(function_list funcs) {
-	for (int i=0; i<funcs.len; i++) {
-		free(funcs.ptr[i].arguments.ptr);
-		statements_free(funcs.ptr[i].body);
-	}
-	free(funcs.ptr);
 }
 
 program parse_program(lexer* lex) {

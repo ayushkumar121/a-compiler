@@ -1,6 +1,7 @@
 int error_count;
 
 #include "basic.c"
+#include "arena.c"
 #include "lexer.c"
 #include "types.c"
 #include "parser.c"
@@ -13,6 +14,7 @@ struct {
 } flags;
 
 int main(int argc, char** argv) {
+	arena_init(&ga, GLOBAL_ARENA_CAP);
 	Args args = {1, argc, argv};
 
 	string file_path = args_next(&args);
