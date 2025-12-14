@@ -681,7 +681,7 @@ expression parse_expression_atom(lexer* lex) {
 					return expression_error;
 				}
     			array_append(&(ex.as.func_call.expressions), expr);
-    
+
 				t = lexer_peek_token(lex);
     			if (t.type == token_comma) lexer_next_token(lex);
     			else if (t.type == token_right_paren) break;
@@ -706,6 +706,19 @@ expression parse_expression_atom(lexer* lex) {
 	return ex;
 }
 
+void expression_free(expression* expr) {
+	switch(expr->type) {
+	case expression_type_func_call:
+		expression_free(expr->as.func_call.expressions.ptr);
+		break;
+	case expression_type_tree:
+		expression_free(expr->as.tree.operands.ptr);
+		break;
+	default: break;
+	}
+	free(expr);
+}
+
 inline static bool is_infix_op(operator op) {
 	static_assert(operator_none == 9, "is_infix_op needs updating");
 	return op == operator_plus || op == operator_minus || op == operator_star 
@@ -727,7 +740,7 @@ operator parse_operator(token_type typ) {
     switch (typ) {
     case token_plus: return operator_plus;
     case token_minus: return operator_minus;
-    case token_star: return operator_star; 
+    case token_star: return operator_star;
     case token_slash: return operator_slash;
     case token_dot: return operator_dot;
     case token_ampersand: return operator_ampersand;
@@ -1177,6 +1190,9 @@ structure parse_struct(lexer* lex) {
 }
 
 void structs_free(structure_list structs) {
+	for (int i=0; i<structs.len; i++) {
+		free(structs.ptr[i].parameters.ptr);
+	}
 	free(structs.ptr);
 }
 
