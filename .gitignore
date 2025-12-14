@@ -5,3 +5,5 @@ tinyc
 tests
 foo
 .DS_STORE
+examples/*
+!examples/*.tc

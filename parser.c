@@ -1,6 +1,3 @@
-// begin types
-
-typedef struct type type;
 typedef struct expression expression;
 typedef struct statement statement;
 typedef struct statement_list statement_list;
@@ -8,90 +5,6 @@ typedef struct scope scope;
 typedef struct binding binding;
 typedef struct binding_list binding_list;
 typedef struct expression expression;
-
-typedef struct {
-	int len;
-	int cap;
-	type* ptr;
-} type_list;
-
-typedef enum {
-	type_none,
-	type_primitive,
-	type_wrapped,
-	type_slice,
-	type_array,
-	type_struct,
-	type_function,
-} type_type;
-
-typedef enum {
-	primitive_none,
-	primitive_void,
-	primitive_byte,
-	primitive_ubyte,
-	primitive_int,
-	primitive_uint,
-	primitive_short,
-	primitive_ushort,
-	primitive_long,
-	primitive_ulong,
-	primitive_float,
-	primitive_double,
-	primitive_string,
-} primitive_type;
-
-typedef enum {
-	wrapped_type_constant,
-	wrapped_type_pointer,
-	wrapped_type_optional,
-	wrapped_type_result,
-	// TODO: slice?
-} wrapped_type_type;
-
-typedef struct {
-	wrapped_type_type type;
-	type* inner;
-} wrapped_type;
-
-typedef struct {
-	int size;
-	type* inner;
-} array_type;
-
-typedef struct {
-	type* inner;
-} slice_type;
-
-typedef struct {
-	bool complete;
-	string identifier;
-	int field_count;
-	string* field_names;
-	type* field_types;
-} struct_type;
-
-typedef struct {
-	string identifier;
-	type* return_type;
-	type_list arguments;
-} function_type;
-
-typedef struct type {
-	type_type type;
-	union {
-		primitive_type primitive;
-		wrapped_type wrapped;
-		array_type array;
-		slice_type slice;
-		struct_type structure;
-		function_type function;
-	} as;
-} type;
-
-#define type_error (struct type){.type=type_none}
-
-// end types
 
 typedef struct binding {
 	bool error;
@@ -392,6 +305,7 @@ string wrapped_to_string(wrapped_type_type typ) {
 	case wrapped_type_pointer: return sv("*");
 	case wrapped_type_optional: return sv("?");
 	case wrapped_type_result: return sv("!");
+	case wrapped_type_slice: return sv("[]");
 	}
 	unreachable();
 }
@@ -401,7 +315,6 @@ string type_to_string(type typ) {
 	case type_none: return sv("");
 	case type_primitive: return primitive_to_string(typ.as.primitive);
 	case type_wrapped: return tconcat(wrapped_to_string(typ.as.wrapped.type), type_to_string(*typ.as.wrapped.inner));
-	case type_slice: return tsprintf("[]%.*s", sarg(type_to_string(*typ.as.slice.inner)));
 	case type_array: return tsprintf("[%d]%.*s",typ.as.array.size, sarg(type_to_string(*typ.as.array.inner)));
 	case type_struct: {
 		string s = tconcat(typ.as.structure.identifier, sv("{"));
@@ -541,9 +454,6 @@ void type_free(type* t) {
 	case type_wrapped:
 		type_free(t->as.wrapped.inner);
 		break;
-	case type_slice:
-		type_free(t->as.slice.inner);
-		break;
 	case type_array:
 		type_free(t->as.array.inner);
 		break;
@@ -619,13 +529,14 @@ type parse_type(lexer* lex) {
 			typ.as.array.inner = malloc(sizeof(type));
 			*(typ.as.array.inner) = parse_type(lex);
 		} else {
-			typ.type = type_slice;
+			typ.type = type_wrapped;
 			if (t.type != token_right_bracket) {
 				report_parser_error(lex, tconcat(sv("expected ] but got"), t.value));
 				return type_error;
 			}
-			typ.as.slice.inner = malloc(sizeof(type));
-			*(typ.as.slice.inner) = parse_type(lex);
+			typ.as.wrapped.type = wrapped_type_slice;
+			typ.as.wrapped.inner = malloc(sizeof(type));
+			*(typ.as.wrapped.inner) = parse_type(lex);
 		}
 	} else if (t.type == token_keyword) {
 		if (t.keyword == keyword_const) {

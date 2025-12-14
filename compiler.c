@@ -183,10 +183,6 @@ type resolve_complete_type(type type) {
 		*type.as.array.inner = resolve_complete_type(*type.as.array.inner);
 		return type;
 	}
-	case type_slice: {
-		*type.as.slice.inner = resolve_complete_type(*type.as.slice.inner);
-		return type;
-	}
 	case type_struct: {
 		if (type.as.structure.complete) return type;
 
@@ -397,7 +393,6 @@ bool type_eq(type* a, type* b) {
 	case type_wrapped: return a->as.wrapped.type == b->as.wrapped.type && 
 		type_eq(a->as.wrapped.inner, b->as.wrapped.inner);
 	case type_struct: return string_eq(a->as.structure.identifier, b->as.structure.identifier);
-	case type_slice: return type_eq(a->as.slice.inner, b->as.slice.inner);
 	case type_array: return a->as.array.size == b->as.array.size && type_eq(a->as.array.inner, b->as.array.inner);
 	case type_function: return string_eq(a->as.function.identifier, b->as.function.identifier);
 	case type_none: unreachable();

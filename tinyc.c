@@ -2,6 +2,7 @@ int error_count;
 
 #include "basic.c"
 #include "lexer.c"
+#include "types.c"
 #include "parser.c"
 #include "compiler.c"
 #include "simulator.c"

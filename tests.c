@@ -3,6 +3,7 @@ int error_count = 0;
 
 #include "basic.c"
 #include "lexer.c"
+#include "types.c"
 #include "parser.c"
 #include "compiler.c"
 #include "codegen.c"

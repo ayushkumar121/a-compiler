@@ -3,10 +3,10 @@ CFLAGS=-Wall -Werror -g -fsanitize=address -fsanitize=undefined
 
 all: tinyc tests
 
-tinyc: tinyc.c basic.c lexer.c parser.c compiler.c codegen.c simulator.c codegen/*.c
+tinyc: tinyc.c basic.c lexer.c types.c parser.c compiler.c codegen.c simulator.c codegen/*.c
 	cc -o tinyc tinyc.c $(CFLAGS)
 
-tests: tests.c basic.c lexer.c parser.c compiler.c codegen.c simulator.c codegen/*.c
+tests: tests.c basic.c lexer.c types.c parser.c compiler.c codegen.c simulator.c codegen/*.c
 	cc -o tests tests.c $(CFLAGS)
 
 foo: foo.asm
