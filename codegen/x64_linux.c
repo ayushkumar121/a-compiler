@@ -3,12 +3,12 @@ typedef enum {
 	R10, R11, R12, R13, R14, R15, RAX, RBX, RSP, RBP, x64_register_count
 } x64_register;
 
-// x64_register x64_vreg_maping[vreg_count] = {
-// 	[VR0] = R10,
-// 	[VR1] = R11,
-// 	[VR2] = R12,
-// 	[VR3] = R13,
-// };
+x64_register x64_vreg_mapping[vreg_count] = {
+	[VR0] = R10,
+	[VR1] = R11,
+	[VR2] = R12,
+	[VR3] = R13,
+};
 
 const char* x64_register_name(x64_register reg, int size)
 {
@@ -70,6 +70,13 @@ void x64_load(FILE* out, x64_register reg, argument src) {
 		fprintf(out, "  mov%c $%d, %%%s\n", reg_size, src.as.value, x64_register_name(reg, src.size));
 		break;
 
+	case argument_type_vreg:
+		ASSERT(reg != x64_vreg_mapping[src.as.vreg]);
+    	fprintf(out, "  mov%c %%%s, %%%s\n", reg_size, 
+    		x64_register_name(x64_vreg_mapping[src.as.vreg], src.size),
+    		x64_register_name(reg, src.size));
+		break;
+
 	case argument_type_local:
 		fprintf(out, "  mov%c -%d(%%rbp), %%%s\n", reg_size, src.as.offset, x64_register_name(reg, src.size));
 		break;
@@ -89,6 +96,13 @@ void x64_store(FILE* out, x64_register reg, argument dst) {
 	char reg_size = register_size(dst.size);
 
 	switch(dst.type) {
+	case argument_type_vreg:
+		ASSERT(reg != x64_vreg_mapping[dst.as.vreg]);
+    	fprintf(out, "  mov%c %%%s, %%%s\n", reg_size, 
+    		x64_register_name(reg, dst.size), 
+    		x64_register_name(x64_vreg_mapping[dst.as.vreg], dst.size));
+		break;
+
 	case argument_type_local:
 		fprintf(out, "  mov%c %%%s, -%d(%%rbp)\n", reg_size, x64_register_name(reg, dst.size), dst.as.offset);
 		break;
@@ -316,6 +330,49 @@ void codegen_for_x64_linux(intermediate_representation ir, string asm_path) {
 
 		case ins_binop: {
 			switch(ins.as.op.type) {
+			case op_add:
+				fprintf(out, "; op_add\n");
+				x64_load(out, RAX, ins.as.op.src1);
+				x64_load(out, RBX, ins.as.op.src2);
+				fprintf(out, "  add%c %%rbx, %%rax\n", register_size(ins.as.op.dst.size));
+				x64_store(out, RAX, ins.as.op.dst);
+				break;
+
+			case op_sub:
+				fprintf(out, "; op_sub\n");
+				x64_load(out, RAX, ins.as.op.src1);
+				x64_load(out, RBX, ins.as.op.src2);
+				fprintf(out, "  sub%c %%rbx, %%rax\n", register_size(ins.as.op.dst.size));
+				x64_store(out, RAX, ins.as.op.dst);
+				break;
+
+			case op_mul:
+				fprintf(out, "; op_mul\n");
+				x64_load(out, RAX, ins.as.op.src1);
+				x64_load(out, RBX, ins.as.op.src2);
+			    fprintf(out, "  imul%c %%rbx, %%rax\n", register_size(ins.as.op.dst.size));
+				x64_store(out, RAX, ins.as.op.dst);
+				break;
+
+			case op_div:
+				fprintf(out, "; op_div\n");
+				x64_load(out, RAX, ins.as.op.src1);
+				x64_load(out, RBX, ins.as.op.src2);
+				fprintf(out, "  %s\n",(ins.as.op.dst.size == 8)?"cqo":"cdq"); 
+			    fprintf(out, "  idiv%c %%rbx\n", register_size(ins.as.op.dst.size));
+				x64_store(out, RAX, ins.as.op.dst);
+				break;
+
+			case op_madd:
+			    fprintf(out, "; op_madd\n");
+			    x64_load(out, RAX, ins.as.op.src1);
+			    x64_load(out, RBX, ins.as.op.src2);
+			    fprintf(out, "  imul%c %%rbx, %%rax\n", register_size(ins.as.op.dst.size));
+			    x64_load(out, RCX, ins.as.op.dst);
+			    fprintf(out, "  add%c %%rcx, %%rax\n", register_size(ins.as.op.dst.size));
+			    x64_store(out, RAX, ins.as.op.dst);
+			    break;
+	
 			case op_store:
 				fprintf(out, "# op_store\n");
 				x64_load(out, RAX, ins.as.op.src1);
@@ -328,7 +385,7 @@ void codegen_for_x64_linux(intermediate_representation ir, string asm_path) {
 				ASSERT(ins.as.op.src2.type != argument_type_none);
 				x64_load(out, RAX, ins.as.op.src1);
 				break;
-			default: break;
+			default: unreachable();
 			}
 		} break;
 

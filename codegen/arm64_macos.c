@@ -377,7 +377,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 				break;
 
 			case op_div:
-				fprintf(out, "; op_mul\n");
+				fprintf(out, "; op_div\n");
 				arm64_load(out, 0, ins.as.op.src1);
 				arm64_load(out, 1, ins.as.op.src2);
 				fprintf(out, "  sdiv x0, x0, x1\n");
