@@ -393,6 +393,13 @@ void codegen_for_x64_linux(intermediate_representation ir, string asm_path) {
 				x64_store(out, RCX, ins.as.op.dst);
 				break;
 
+			case op_addrof:
+				fprintf(out, "; op_addrof\n");
+				ASSERT(ins.as.op.dst.size == PTR_SIZE);
+				x64_load_addr(out, 0, ins.as.op.src1);
+				x64_store(out, 0, ins.as.op.dst);
+				break;
+
 			case op_store:
 				fprintf(out, "# op_store\n");
 				x64_load(out, RAX, ins.as.op.src1);
@@ -405,9 +412,31 @@ void codegen_for_x64_linux(intermediate_representation ir, string asm_path) {
 				ASSERT(ins.as.op.src2.type != argument_type_none);
 				x64_load(out, RAX, ins.as.op.src1);
 				break;
-			default: unreachable();
+
+			case op_copy:
+				fprintf(out, "; op_copy\n");
+			    ASSERT(ins.as.op.src2.type == argument_type_literal);
+			    int size = ins.as.op.src2.as.value;
+			    arm64_load_addr(out, RAX, ins.as.op.src1);  // src address -> x0
+			    arm64_load_addr(out, RBX, ins.as.op.dst);   // dst address -> x1
+			    x64_memcpy(out, RAX, RBX, size);
+				break;
+
+			default: 
+				printf("unimplemented op %d\n", ins.as.op.type);
+				unreachable();
 			}
 		} break;
+
+		case ins_jmp:
+			fprintf(out, "  jmp "sfmt"\n", sarg(x64_linux_label(ins.as.jmp.label)));
+			break;
+
+		case ins_jmp_ifnot:
+			x64_load(out, 0, ins.as.jmpifnot.cond);
+			fprintf(out, "  cmpq $0, %%rax\n");
+    		fprintf(out, "  je "sfmt"\n", sarg(x64_linux_label(ins.as.jmpifnot.label)));
+			break;
 
 		default: unreachable();
 		}
