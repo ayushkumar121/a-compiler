@@ -248,6 +248,14 @@ void simulate(intermediate_representation ir) {
 				store(ins.as.op.dst, load64(ins.as.op.dst) + load(ins.as.op.src1) * load(ins.as.op.src2));
 			} break;
 
+			case op_lt: {
+				store(ins.as.op.dst, load(ins.as.op.src1) < load(ins.as.op.src2));
+			} break;
+
+			case op_gt: {
+				store(ins.as.op.dst, load(ins.as.op.src1) > load(ins.as.op.src2));
+			} break;
+
 			case op_addrof: {
 				ASSERT(ins.as.op.dst.size == PTR_SIZE);
 				store(ins.as.op.dst, (uint64_t)argument_location(ins.as.op.src1));
@@ -258,23 +266,6 @@ void simulate(intermediate_representation ir) {
 				ASSERT(ins.as.op.src1.size <=  ins.as.op.dst.size);
 				store(ins.as.op.dst, load(ins.as.op.src1));
 			} break;
-
-			// case op_load_param: {
-			// 	ASSERT(ins.as.op.src1.size <=  ins.as.op.dst.size);
-			// 	ASSERT(ins.as.op.src1.type ==  argument_type_param);
-
-			//     int idx = ins.as.op.src1.as.index;
-			//     argument dst = ins.as.op.dst;
-		 //    	if (ins.as.op.src1.size <= 8) {
-			// 		store(ins.as.op.dst, regs[idx]);
-			// 	} else if (ins.as.op.src1.size <= 16) {
-			// 		// TODO: find actual field size
-			// 		store(argument_field(dst, 0, PTR_SIZE), regs[idx]);
-			// 		store(argument_field(dst, PTR_SIZE, PTR_SIZE), regs[idx+1]);
-			// 	} else {
-			// 		memcpy(argument_location(ins.as.op.dst), (void*)regs[idx], ins.as.op.src1.size);
-			// 	}
-			// } break;
 
 			case op_load_indirect: {
 				ASSERT(ins.as.op.dst.size <= PTR_SIZE);

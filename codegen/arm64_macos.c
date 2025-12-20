@@ -393,6 +393,25 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			    arm64_store(out, 0, ins.as.op.dst);
 				break;
 
+			case op_lt:
+				fprintf(out, "; op_lt\n");
+				arm64_load(out, 0, ins.as.op.src1);
+				arm64_load(out, 1, ins.as.op.src2);
+				fprintf(out, "  cmp x0, x1\n");
+				fprintf(out, "  cset x2, lt\n");
+				arm64_store(out, 2, ins.as.op.dst);
+				break;
+
+			case op_gt:
+				fprintf(out, "; op_gt\n");
+				fprintf(out, "; op_lt\n");
+				arm64_load(out, 0, ins.as.op.src1);
+				arm64_load(out, 1, ins.as.op.src2);
+				fprintf(out, "  cmp x0, x1\n");
+				fprintf(out, "  cset x2, gt\n");
+				arm64_store(out, 2, ins.as.op.dst);
+				break;
+
 			case op_addrof:
 				fprintf(out, "; op_addrof\n");
 				ASSERT(ins.as.op.dst.size == PTR_SIZE);

@@ -23,6 +23,8 @@ typedef enum {
 	op_div,
 	// stores dst+src1*src2 to dst
 	op_madd,
+	op_lt,
+	op_gt,
 	// loads of the pointer of src1 to dst
 	op_addrof,
 	// stores the values of src1 to dst
@@ -553,6 +555,8 @@ argument compile_binop(frame* frame, expression_tree expr_tree) {
 		case operator_minus: op = op_sub; break;
 		case operator_star: op = op_mul; break;
 		case operator_slash: op = op_div; break;
+		case operator_less_than: op = op_lt; break;
+		case operator_greater_than: op = op_gt; break;
 		default: unreachable();
 		}
 
@@ -839,6 +843,25 @@ void compile_statement(frame* frame, statement stm) {
 			compile_statement_list(frame, stm.as.iff.else_body);
 		}
 		add_instruction_label(end_label);
+	} break;
+
+	case statement_type_while: {
+		static int while_counter = 0;
+		string while_label = tsprintf("while%d", while_counter);
+		string while_end_label = tsprintf("while_end%d", while_counter);
+		while_counter++;
+
+		add_instruction_label(while_label);
+		argument cond = compile_expression(frame, stm.as.whil.condition);
+		if (cond.type == argument_type_none) return;
+		if (cond.size > PTR_SIZE) {
+			report_compiler_error(loc, sv("condition must be integeral"));
+			return;
+		}
+		add_instruction_jmpifnot(cond, while_end_label);
+		compile_statement_list(frame, stm.as.iff.iff_body);
+		add_instruction_jmp(while_label);
+		add_instruction_label(while_end_label);
 	} break;
 
 	case statement_type_func_call: {

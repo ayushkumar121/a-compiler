@@ -373,6 +373,26 @@ void codegen_for_x64_linux(intermediate_representation ir, string asm_path) {
 			    x64_store(out, RAX, ins.as.op.dst);
 			    break;
 	
+			case op_lt:
+				fprintf(out, "; op_lt\n");
+				x64_load(out, RAX, ins.as.op.src1);
+				x64_load(out, RBX, ins.as.op.src2);
+				fprintf(out, "  cmpq %%rbx, %%rax\n");
+				fprintf(out, "  setl %%cl\n");
+				fprintf(out, "  movzbq %%cl, %%rcx\n");
+				x64_store(out, RCX, ins.as.op.dst);
+				break;
+
+			case op_gt:
+				fprintf(out, "; op_gt\n");
+				x64_load(out, RAX, ins.as.op.src1);
+				x64_load(out, RBX, ins.as.op.src2);
+				fprintf(out, "  cmpq %%rbx, %%rax\n");
+				fprintf(out, "  setg %%cl\n");
+				fprintf(out, "  movzbq %%cl, %%rcx\n");
+				x64_store(out, RCX, ins.as.op.dst);
+				break;
+
 			case op_store:
 				fprintf(out, "# op_store\n");
 				x64_load(out, RAX, ins.as.op.src1);

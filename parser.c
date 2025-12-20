@@ -30,6 +30,8 @@ typedef enum {
 	operator_question,
 	operator_exclaimation,
 	operator_index,
+	operator_less_than,
+	operator_greater_than,
 	operator_none,
 } operator;
 
@@ -361,6 +363,8 @@ string operator_to_string(operator op) {
 	case operator_question: return sv("?");
 	case operator_exclaimation: return sv("!");
 	case operator_index: return sv("[]");
+	case operator_less_than: return sv("<");
+	case operator_greater_than: return sv(">");
 	}
 	unreachable();
 }
@@ -615,8 +619,10 @@ typedef struct {
 } binding_power;
 
 binding_power infix_binding_power(operator op) {
-	static_assert(operator_none == 9, "infix_binding_power needs updating");
+	static_assert(operator_none == 11, "infix_binding_power needs updating");
 	switch(op) {
+	case operator_less_than:
+	case operator_greater_than:
 	case operator_plus:
 	case operator_minus: return (binding_power){1, 2};
 	case operator_star:
@@ -627,7 +633,7 @@ binding_power infix_binding_power(operator op) {
 }
 
 binding_power prefix_binding_power(operator op) {
-	static_assert(operator_none == 9, "prefix_binding_power needs updating");
+	static_assert(operator_none == 11, "prefix_binding_power needs updating");
 	switch(op) {
 	case operator_plus:
 	case operator_minus: return (binding_power){0, 5};
@@ -638,7 +644,7 @@ binding_power prefix_binding_power(operator op) {
 }
 
 binding_power postfix_binding_power(operator op) {
-	static_assert(operator_none == 9, "postfix_binding_power needs updating");
+	static_assert(operator_none == 11, "postfix_binding_power needs updating");
 	switch(op) {
 	case operator_index:
 	case operator_question:
@@ -720,23 +726,23 @@ void expression_free(expression* expr) {
 }
 
 inline static bool is_infix_op(operator op) {
-	static_assert(operator_none == 9, "is_infix_op needs updating");
+	static_assert(operator_none == 11, "is_infix_op needs updating");
 	return op == operator_plus || op == operator_minus || op == operator_star 
-	|| op == operator_slash || op == operator_dot;
+	|| op == operator_slash || op == operator_dot || op == operator_less_than || op == operator_greater_than;
 }
 
 inline static bool is_prefix_op(operator op) {
-	static_assert(operator_none == 9, "is_prefix_op needs updating");
+	static_assert(operator_none == 11, "is_prefix_op needs updating");
 	return op == operator_plus || op == operator_minus || op == operator_star || op == operator_ampersand;
 }
 
 inline static bool is_postfix_op(operator op) {
-	static_assert(operator_none == 9, "is_postfix_op needs updating");
+	static_assert(operator_none == 11, "is_postfix_op needs updating");
 	return op == operator_question || op == operator_exclaimation || op == operator_index;
 }
 
 operator parse_operator(token_type typ) {
-	static_assert(operator_none == 9, "parse_operator needs updating");
+	static_assert(operator_none == 11, "parse_operator needs updating");
     switch (typ) {
     case token_plus: return operator_plus;
     case token_minus: return operator_minus;
@@ -747,6 +753,8 @@ operator parse_operator(token_type typ) {
     case token_question: return operator_question;
     case token_exclaimation: return operator_exclaimation;
     case token_left_bracket: return operator_index;
+    case token_less_than: return operator_less_than;
+    case token_greater_than: return operator_greater_than;
     default: return operator_none;
     }
 }
@@ -1111,7 +1119,7 @@ statement parse_statement(lexer* lex) {
 		// expected ; after statement
 		if (lexer_peek_token(lex).type == token_semicolon) lexer_next_token(lex);
 		else {
-			printf(sfmt"\n", sarg(lexer_current_value(lex)));
+			// printf("found:"sfmt"\n", sarg(lexer_current_value(lex)));
 			report_parser_error(lex, sv("expected semicolon"));
 			synchronise(lex, synchronise_token_statement);
 			return statement_error;

@@ -1,0 +1,13 @@
+func main() {
+	var i int = 0;
+	while i < 10 {
+		print("hello world\n");
+		i = i+1;
+	}
+
+	i = 10;
+	while i > 0 {
+		print("world hello\n");
+		i = i-1;
+	}
+}
