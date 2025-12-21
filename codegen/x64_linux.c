@@ -10,8 +10,7 @@ x64_register x64_vreg_mapping[vreg_count] = {
 	[VR3] = R13,
 };
 
-const char* x64_register_name(x64_register reg, int size)
-{
+const char* x64_register_name(x64_register reg, int size) {
     int idx =
         (size == 1) ? 0 :
         (size == 4) ? 1 :
@@ -452,7 +451,6 @@ void codegen_for_x64_linux(intermediate_representation ir, string asm_path) {
 
 	fclose(out);
 }
-
 
 void exegen_for_x64_linux(string exe_path, string asm_path) {
 	fprintf(stderr, "info: generating "sfmt"\n", sarg(exe_path));

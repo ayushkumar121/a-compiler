@@ -452,7 +452,7 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 			    int size = ins.as.op.src2.as.value;
 			    arm64_load_addr(out, X0, ins.as.op.src1);  // src address -> x0
 			    arm64_load_addr(out, X1, ins.as.op.dst);   // dst address -> x1
-			    arm64_memcpy(out, X0, X1, size);
+			    arm64_memcpy(out, X1, X0, size);
 			    break;
 
 			default:{
