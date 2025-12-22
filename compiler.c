@@ -29,8 +29,6 @@ typedef enum {
 	op_addrof,
 	// stores the values of src1 to dst
 	op_store,
-	// loads the value passed in param to dst
-	//op_load_param,
 	// loads the value stored in pointer stored in src1 to dst, loads src2 bytes
 	op_load_indirect,
 	// stores the value of src1 to pointer in dst, stores src2 bytes
@@ -52,7 +50,6 @@ typedef enum {
 	argument_type_vreg,
 	argument_type_local,
 	argument_type_global,
-	// argument_type_param,
 	argument_type_string,
 	argument_type_literal,
 } argument_type;
