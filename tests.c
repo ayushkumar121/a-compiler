@@ -72,6 +72,12 @@ void test_compiler_004(void) {
     ASSERT(WEXITSTATUS(status) == 10);
 }
 
+void test_compiler_008(void) {
+	int status = system("./tinyc ./examples/008-big-structs.tc && ./examples/008-big-structs");
+    ASSERT(WIFEXITED(status));
+    ASSERT(WEXITSTATUS(status) == 15);
+}
+
 int main(void) {
 	test_type_parsing();
 	test_infix_expr_parsing();
@@ -81,6 +87,7 @@ int main(void) {
 	test_compiler_002();
 	test_compiler_003();
 	test_compiler_004();
+	test_compiler_008();
 
 	fprintf(stderr, "info: all test passed\n");
 }

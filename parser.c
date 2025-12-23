@@ -449,28 +449,28 @@ type type_of_wrapped(wrapped_type_type wrapped_type, type* inner) {
 	return typ;
 }
 
-void type_free(type* t) {
-	ASSERT(t != NULL);
-	switch(t->type) {
-	case type_none:
-	case type_primitive:
-		break;
-	case type_wrapped:
-		type_free(t->as.wrapped.inner);
-		break;
-	case type_array:
-		type_free(t->as.array.inner);
-		break;
-	case type_struct:
-		if (t->as.structure.field_count>0) type_free(t->as.structure.field_types);
-		break;
-	case type_function:
-		if (t->as.function.arguments.len>0) type_free(t->as.function.arguments.ptr);
-		type_free(t->as.function.return_type);
-		break;
-	}
-	free(t);
-}
+// void type_free(type* t) {
+// 	ASSERT(t != NULL);
+// 	switch(t->type) {
+// 	case type_none:
+// 	case type_primitive:
+// 		break;
+// 	case type_wrapped:
+// 		type_free(t->as.wrapped.inner);
+// 		break;
+// 	case type_array:
+// 		type_free(t->as.array.inner);
+// 		break;
+// 	case type_struct:
+// 		if (t->as.structure.field_count>0) type_free(t->as.structure.field_types);
+// 		break;
+// 	case type_function:
+// 		if (t->as.function.arguments.len>0) type_free(t->as.function.arguments.ptr);
+// 		type_free(t->as.function.return_type);
+// 		break;
+// 	}
+// 	free(t);
+// }
 
 // Parsers
 

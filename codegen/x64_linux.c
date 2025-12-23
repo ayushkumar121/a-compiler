@@ -157,7 +157,7 @@ string x64_linux_label(string label) {
 	if (!inside_function) {
 		return label;
 	} else {
-		return tconcat(sv("."), label);
+		return tconcat(sv(".L"), label);
 	}
 }
 

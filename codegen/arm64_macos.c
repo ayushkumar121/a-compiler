@@ -179,11 +179,11 @@ void arm64_memcpy(FILE* out, arm64_register dst, arm64_register src, int n) {
 	fprintf(out, "2:\n");
 }
 
-string arm64_macos_label(string l) {
+string arm64_macos_label(string label) {
 	if (!inside_function) {
-		return tsprintf("_"sfmt, sarg(l));
+		return tconcat(sv("_"), label);
 	} else {
-		return tsprintf("."sfmt, sarg(l));
+		return tconcat(sv(".L"), label);
 	}
 }
 
@@ -496,6 +496,6 @@ void exegen_for_arm64_macos(string exe_path, string asm_path) {
 	cmd(tsprintf("as -o %.*s.o %.*s",
 		sarg(exe_path), sarg(asm_path)));
 
-	cmd(tsprintf("ld -o %.*s %.*s.o -lSystem -syslibroot `xcrun --show-sdk-path` -e _start",
+	cmd(tsprintf("ld -o %.*s %.*s.o -x -lSystem -syslibroot `xcrun --show-sdk-path` -e _start",
 		sarg(exe_path), sarg(exe_path)));
 }

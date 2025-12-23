@@ -157,17 +157,15 @@ symbol* symbol_lookup(string identifier, symbol_type symbol_type) {
 	return NULL;
 }
 
-// top = [1] -> [2] -> null
-// saved = [2] -> null
 void symbol_restore(symbol* saved) {
-	ASSERT(symbol_top != NULL);
-	symbol* s = symbol_top;
-	while(s != saved && s != NULL) {
-		symbol* next = s->next;
-		type_free(s->type);
-		free(s);
-		s = next;
-	}
+	// ASSERT(symbol_top != NULL);
+	// symbol* s = symbol_top;
+	// while(s != saved && s != NULL) {
+	// 	symbol* next = s->next;
+	// 	type_free(s->type);
+	// 	free(s);
+	// 	s = next;
+	// }
 	symbol_top = saved;
 }
 
@@ -399,6 +397,38 @@ bool type_eq(type* a, type* b) {
 	unreachable();
 }
 
+bool type_convertible(type* to, type* from) {
+	switch(to->type) {
+	case type_primitive: {
+		if (from->type != type_primitive) return false;
+
+		switch(to->as.primitive) {
+		case primitive_byte:
+		case primitive_ubyte:
+			// return from->as.primitive == primitive_byte ||
+			// from->as.primitive == primitive_ubyte;
+		case primitive_int:
+		case primitive_uint:
+			// return from->as.primitive == primitive_byte ||
+			// from->as.primitive == primitive_ubyte || 
+			// from->as.primitive == primitive_int || 
+			// from->as.primitive == primitive_uint;
+		case primitive_long:
+		case primitive_ulong:
+			return from->as.primitive == primitive_int || 
+			from->as.primitive == primitive_uint ||
+			from->as.primitive == primitive_long ||
+			from->as.primitive == primitive_ulong||
+			from->as.primitive == primitive_byte ||
+			from->as.primitive == primitive_ubyte;
+		default: return false;
+		}
+	}
+	default: return false;
+	}
+	unreachable();
+}
+
 type type_of_expression(expression expr) {
 	switch(expr.type) {
 	case expression_type_literal: {
@@ -445,6 +475,14 @@ type type_of_expression(expression expr) {
 					return type_of_primitive(primitive_byte);
 				} else unreachable();
 			}
+			case operator_dot: {
+				type struct_type = type_of_expression(expr.as.tree.operands.ptr[0]);
+				string fieldname = expr.as.tree.operands.ptr[1].as.identifier;
+
+				ASSERT(struct_type.type == type_struct);
+				field f = struct_field(struct_type.as.structure, fieldname);
+				return f.type;
+			} 
 			default: unreachable();
 			}
 		} else unreachable();
@@ -669,7 +707,7 @@ void compile_assignment(frame* frame, statement_assign assignment) {
 		if (src.type == argument_type_none) return;
 
 		type value_type = type_of_expression(assignment.value);
-		if (!type_eq(decl_type, &value_type)) {
+		if (!type_eq(decl_type, &value_type) && !type_convertible(decl_type, &value_type)) {
 			report_compiler_error(loc, type_mismatch_error(*decl_type, value_type));
 			return;
 		}
@@ -726,7 +764,7 @@ void compile_assignment(frame* frame, statement_assign assignment) {
 		}
 
 		type value_type = type_of_expression(assignment.value);
-		if (!type_eq(&f.type, &value_type)) {
+		if (!type_eq(&f.type, &value_type) && !type_convertible(&f.type, &value_type)) {
 			report_compiler_error(loc, type_mismatch_error(f.type, value_type));
 			return;
 		}
@@ -765,7 +803,7 @@ void compile_statement(frame* frame, statement stm) {
 		argument dst;
 		if (decl.value.type != expression_type_none) {
 			type value_type = type_of_expression(decl.value);
-			if (!type_eq(&decl_type, &value_type)) {
+			if (!type_eq(&decl_type, &value_type) && !type_convertible(&decl_type, &value_type)) {
 				report_compiler_error(loc, type_mismatch_error(decl_type, value_type));
 				return;
 			}
@@ -801,7 +839,7 @@ void compile_statement(frame* frame, statement stm) {
 
 			type* return_type = symbl->type->as.function.return_type;
 			type value_type = type_of_expression(stm.as.ret.value);
-			if (!type_eq(return_type, &value_type)) {
+			if (!type_eq(return_type, &value_type) && !type_convertible(return_type, &value_type)) {
 				report_compiler_error(loc, type_mismatch_error(*return_type, value_type));
 				return;
 			}

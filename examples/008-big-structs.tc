@@ -1,0 +1,19 @@
+struct foo {
+	a long
+	b long
+	c long
+	d long
+	f long
+}
+
+func main() int {
+	var f1 foo;
+	f1.a = 1;
+	f1.b = 2;
+	f1.c = 3;
+	f1.d = 4;
+	f1.f = 5;
+	var f2 foo;
+	f2 = f1;
+	return f2.a+f2.b+f2.c+f2.d+f2.f;
+}
