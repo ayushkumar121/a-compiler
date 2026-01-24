@@ -96,7 +96,9 @@ int find_label_pos(string identifier) {
 		label_pos l = labels.ptr[i];
 		if(string_eq(l.identifier, identifier)) return l.pos;
 	}
-	unreachable();
+	
+	fprintf(stderr, "error: undefined reference to function "sfmt"\n", sarg(identifier));
+	exit(1);
 }
 
 int find_builtin(string identifier) {
@@ -134,11 +136,8 @@ void simulate(intermediate_representation ir) {
 			if (string_eq(ins.as.label, sv("main"))) pc = i;
 		}
 	}
-
-	if (pc == -1) {
-		fprintf(stderr, "error: no main function found\n");
-		exit(1);
-	}
+	ASSERT(pc != -1);
+	
 	fprintf(stderr, "info: main at pc: %d\n", pc);
 
 	regs[29] = (uint64_t)(uintptr_t)stack_ptr;

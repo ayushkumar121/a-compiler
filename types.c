@@ -29,6 +29,7 @@ typedef enum {
 	primitive_float,
 	primitive_double,
 	primitive_string,
+	primitive_cstring,
 } primitive_type;
 
 typedef enum {

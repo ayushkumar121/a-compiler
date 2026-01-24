@@ -483,19 +483,19 @@ void codegen_for_arm64_macos(intermediate_representation ir, string asm_path) {
 		fprintf(out, ".section __TEXT,__cstring,cstring_literals\n");
 		for (int i=0; i<ir.string_literals.len; i++) {
 			fprintf(out, ".LC%d:\n", i);
-			fprintf(out, "  .string \""sfmt"\"\n", sarg(string_unescape(ir.string_literals.ptr[i])));
+			fprintf(out, "  .stringz \""sfmt"\"\n", sarg(string_unescape(ir.string_literals.ptr[i])));
 		}
 	}
 
 	fclose(out);
 }
 
-void exegen_for_arm64_macos(string exe_path, string asm_path) {
+void exegen_for_arm64_macos(string exe_path, string asm_path) {	
 	fprintf(stderr, "info: generating "sfmt"\n", sarg(exe_path));
 
 	cmd(tsprintf("as -o %.*s.o %.*s",
 		sarg(exe_path), sarg(asm_path)));
 
-	cmd(tsprintf("ld -o %.*s %.*s.o -x -lSystem -syslibroot `xcrun --show-sdk-path` -e _start",
+	cmd(tsprintf("ld -o "sfmt" "sfmt".o -x -lSystem -syslibroot `xcrun --show-sdk-path` -e _start",
 		sarg(exe_path), sarg(exe_path)));
 }

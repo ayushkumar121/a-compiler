@@ -23,6 +23,7 @@ typedef enum {
 	token_identifier,
 	token_integer,
 	token_string,
+	token_cstring,
 	token_char,
 } token_type;
 
@@ -39,6 +40,7 @@ typedef enum {
 	keyword_float,
 	keyword_double,
 	keyword_string,
+	keyword_cstring,
 	keyword_error,
 	keyword_type,
 	keyword_static,
@@ -87,7 +89,7 @@ inline static string lexer_current_value(lexer* lex) {
 #define keyword_cmp(k, s) (k[0] == s.ptr[0] && sizeof(k)-1 == s.len && memcmp(k, s.ptr, s.len) == 0)
 
 keyword lexer_match_keyword(string s) {
-	static_assert (keyword_none == 35, "lexer_match_keyword needs updating");
+	static_assert (keyword_none == 36, "lexer_match_keyword needs updating");
 
 	if (keyword_cmp("void", s)) {
 		return keyword_void;
@@ -113,6 +115,8 @@ keyword lexer_match_keyword(string s) {
 		return keyword_double;
 	} else if (keyword_cmp("string", s)) {
 		return keyword_string;
+	} else if (keyword_cmp("cstring", s)) {
+		return keyword_cstring;
 	} else if (keyword_cmp("error", s)) {
 		return keyword_error;
 	} else if (keyword_cmp("type", s)) {
@@ -259,7 +263,7 @@ token lexer_peek_token(lexer* lex) {
 		return (token){.type=token_integer, .value=value};
 	}
 
-	// Matching strings
+	// Matching strings	
 	if (lex->source.ptr[lex->start] == '\"') {
 		lex->end++;
 		while (lex->end < lex->source.len && lex->source.ptr[lex->end] != '\"') {
@@ -269,10 +273,15 @@ token lexer_peek_token(lexer* lex) {
 			return token_eof;
 		}
 		lex->end++;
+		token_type tt = token_string;
+		if (lex->source.ptr[lex->end] == 'c') {
+			tt = token_cstring;
+			lex->end++;
+		}
 		string value = lexer_current_value(lex);
-		return (token){.type=token_string, .value=value};
+		printf("value: "sfmt"\n", sarg(value));
+		return (token){.type=tt, .value=value};
 	}
-
 
 	// Matching chars
 	if (lex->source.ptr[lex->start] == '\'') {

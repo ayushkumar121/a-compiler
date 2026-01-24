@@ -93,6 +93,7 @@ typedef struct {
 } instruction_list;
 
 typedef struct {
+	strings externs;
 	strings string_literals;
 	instruction_list instructions;
 } intermediate_representation;
@@ -120,6 +121,7 @@ typedef struct symbol {
 symbol* symbol_top = NULL;
 symbol* symbol_saved = NULL;
 strings string_literals = {0};
+strings externs = {0};
 instruction_list instructions = {0};
 lexer_file_loc loc;
 string current_func_name;
@@ -215,6 +217,7 @@ int size_of_type(type* type) {
 		case primitive_float: return 4;
 		case primitive_double: return 8;
 		case primitive_string: return 2*PTR_SIZE;
+		case primitive_cstring: return PTR_SIZE;
 		case primitive_none: unreachable();
 		}
 	}
@@ -436,17 +439,24 @@ type type_of_expression(expression expr) {
 		case expression_literal_integer: return type_of_primitive(primitive_int);
 		case expression_literal_char: return type_of_primitive(primitive_int);
 		case expression_literal_string: return type_of_primitive(primitive_string);
+		case expression_literal_cstring: return type_of_primitive(primitive_cstring);
 		}
 	}
 	case expression_type_identifier: {
 		symbol* symbl = symbol_lookup(expr.as.identifier, symbol_type_local);
 		if (!symbl) symbl = symbol_lookup(expr.as.identifier, symbol_type_global);
-		ASSERT(symbl && symbl->type);
+		if(!symbl || !symbl->type) {
+			report_compiler_error(loc, tconcat(sv("unknown symbol "), expr.as.func_call.identifier));
+			return type_error;
+		}
 		return *symbl->type;
 	}
 	case expression_type_func_call: {
 		symbol* symbl = symbol_lookup(expr.as.func_call.identifier, symbol_type_function);
-		ASSERT(symbl && symbl->type);
+		if(!symbl || !symbl->type) {
+			report_compiler_error(loc, tconcat(sv("unknown symbol "), expr.as.func_call.identifier));
+			return type_error;
+		}
 		return *symbl->type->as.function.return_type;
 	}
 	case expression_type_tree: {
@@ -657,6 +667,7 @@ argument compile_expression(frame* frame, expression expr) {
 			add_instruction_op(op_store, argument_field(base, PTR_SIZE, PTR_SIZE), argument_string_literal(expr.as.literal.as.string));
 			return base;
 		}
+		case expression_literal_cstring: return argument_string_literal(expr.as.literal.as.string);
 		}
 	}
 	case expression_type_identifier: {
@@ -983,23 +994,55 @@ void compile_builtin(builtin b) {
 	}
 }
 
+void compile_extern(extern_decl edecl) {
+	switch(edecl.type) {
+	case extern_func: {
+		type typ = {0};
+		typ.type = type_function;
+		typ.as.function.return_type = malloc(sizeof(type));
+		typ.as.function.identifier = edecl.as.func.identifier;
+		*(typ.as.function.return_type) = edecl.as.func.return_type;
+		for (int i = 0; i < edecl.as.func.arguments.len; i++) {
+			array_append(&typ.as.function.arguments, edecl.as.func.arguments.ptr[i].type);
+		}
+		symbol_add(symbol_type_function, typ.as.function.identifier, typ, 0);
+		array_append(&externs, typ.as.function.identifier);
+	} break;
+	case extern_var: unreachable();
+	}	
+}
+
 intermediate_representation compile(program prg) {
 	fprintf(stderr, "info: compiling program\n");
 
-	for (int i = 0; i <builtin_count; ++i){
+	for (int i = 0; i<builtin_count; i++){
 		compile_builtin(i);
+	}
+
+	for (int i = 0; i<prg.externs.len; i++){
+		compile_extern(prg.externs.ptr[i]);
 	}
 
 	for (int i=0; i<prg.structs.len; i++) {
 		compile_structure(prg.structs.ptr[i]);
 	}
-	structs_free(prg.structs);
 
 	for (int i=0; i<prg.functions.len; i++) {
 		compile_function(prg.functions.ptr[i]);
 	}
-	functions_free(prg.functions);
 
-	//symbol_restore(NULL);
-	return (intermediate_representation){string_literals, instructions};
+	bool main = false;
+	for (int i = 0; i < instructions.len; ++i) {
+		instruction ins = instructions.ptr[i];
+		if (ins.type == ins_label && string_eq(ins.as.label, sv("main"))) {
+			main = true; 
+			break;
+		}
+	}
+
+	if (!main) {
+		fprintf(stderr, "error: main function not found\n");
+	}
+
+	return (intermediate_representation){externs, string_literals, instructions};
 }

@@ -458,6 +458,6 @@ void exegen_for_x64_linux(string exe_path, string asm_path) {
 	cmd(tsprintf("as -o %.*s.o %.*s",
 		sarg(exe_path), sarg(asm_path)));
 
-	cmd(tsprintf("ld -o %.*s %.*s.o -e _start",
+	cmd(tsprintf("ld -o "sfmt" "sfmt".o -e _start",
 		sarg(exe_path), sarg(exe_path)));
 }
